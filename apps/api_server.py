@@ -240,17 +240,44 @@ async def update_foreman_in_db(foreman_id: int, foreman_data: dict):
     """Обновляет данные бригадира в базе данных."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            first_name = foreman_data.get('full_name') or foreman_data.get('first_name')
-            last_name = foreman_data.get('position') or foreman_data.get('last_name')
+            async with db.execute(
+                "SELECT first_name, last_name, username, is_active FROM foremen WHERE id = ?",
+                (foreman_id,)
+            ) as cursor:
+                existing = await cursor.fetchone()
+
+            if not existing:
+                return False
+
+            existing_first, existing_last, existing_username, existing_is_active = existing
+
+            first_name = (
+                foreman_data.get('full_name')
+                or foreman_data.get('first_name')
+                or existing_first
+            )
+            last_name = (
+                foreman_data.get('position')
+                or foreman_data.get('last_name')
+                or existing_last
+            )
+            username = (
+                foreman_data['username']
+                if 'username' in foreman_data
+                else (existing_username or '')
+            )
+            is_active = foreman_data.get('is_active', existing_is_active)
 
             await db.execute(
                 "UPDATE foremen SET first_name = ?, last_name = ?, username = ?, is_active = ? WHERE id = ?",
-                (first_name, last_name,
-                 foreman_data.get('username', ''), foreman_data['is_active'], foreman_id)
+                (first_name, last_name, username, is_active, foreman_id)
+
             )
             await db.commit()
             if db.rowcount > 0:
-                logger.info(f"👤 Обновлен бригадир ID: {foreman_id}, is_active: {foreman_data['is_active']}")
+                logger.info(
+                    f"👤 Обновлен бригадир ID: {foreman_id}, is_active: {is_active}"
+                )
                 return True
         return False
     except Exception as e:
@@ -1105,13 +1132,20 @@ async def update_foreman(foreman_id: int, request: Request):
             foreman_data['position'] = foreman_data['last_name']
         
         # Валидация
-        required_fields = ["full_name", "position", "is_active"]
+        required_fields = ["full_name", "position"]
         for field in required_fields:
             if field not in foreman_data:
                 raise HTTPException(status_code=400, detail=f"Отсутствует поле: {field}")
         
-        if not isinstance(foreman_data['is_active'], int) or foreman_data['is_active'] not in [0, 1]:
-            raise HTTPException(status_code=400, detail="is_active должно быть 0 или 1")
+        if 'is_active' in foreman_data:
+            is_active_value = foreman_data['is_active']
+            if isinstance(is_active_value, bool):
+                is_active_value = int(is_active_value)
+            if not isinstance(is_active_value, int):
+                raise HTTPException(status_code=400, detail="is_active должно быть числом 0 или 1")
+            if is_active_value not in [0, 1]:
+                raise HTTPException(status_code=400, detail="is_active должно быть 0 или 1")
+            foreman_data['is_active'] = is_active_value
         
         success = await update_foreman_in_db(foreman_id, foreman_data)
         if success:
@@ -1120,6 +1154,8 @@ async def update_foreman(foreman_id: int, request: Request):
             raise HTTPException(status_code=500, detail="Ошибка при обновлении бригадира в БД")
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Неверный формат JSON")
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as e:
         logger.error(f"❌ Ошибка при обновлении бригадира: {e}")
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
