@@ -240,9 +240,12 @@ async def update_foreman_in_db(foreman_id: int, foreman_data: dict):
     """Обновляет данные бригадира в базе данных."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
+            first_name = foreman_data.get('full_name') or foreman_data.get('first_name')
+            last_name = foreman_data.get('position') or foreman_data.get('last_name')
+
             await db.execute(
                 "UPDATE foremen SET first_name = ?, last_name = ?, username = ?, is_active = ? WHERE id = ?",
-                (foreman_data['first_name'], foreman_data['last_name'], 
+                (first_name, last_name,
                  foreman_data.get('username', ''), foreman_data['is_active'], foreman_id)
             )
             await db.commit()
