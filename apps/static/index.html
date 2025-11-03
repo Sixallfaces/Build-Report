@@ -2520,7 +2520,9 @@
                 'Категория': item.Категория,
                 'Работа': item.Работа,
                 'Единица измерения': item['Единица измерения'],
-                'Количество': item.Количество
+                'Количество': item.Количество,
+                'Проектное число': item.Проект,
+                '% выполнения': item['%Выполнения']
             }));
 
             const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -2528,8 +2530,10 @@
             const colWidths = [
                 { wch: 25 },
                 { wch: 40 },
-                { wch: 15 },
-                { wch: 12 }
+                { wch: 18 },
+                { wch: 14 },
+                { wch: 18 },
+                { wch: 16 }
             ];
             worksheet['!cols'] = colWidths;
 
