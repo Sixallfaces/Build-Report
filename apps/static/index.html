@@ -1010,7 +1010,8 @@
 
     <script>
     // Конфигурация API
-    const API_CONFIG = {
+        const API_CONFIG = {
+        BASE_URL: 'https://build-report.ru/',
         ENDPOINTS: {
             WORKS: 'api/works',
             ALL_WORKS: 'api/all-works',
@@ -1024,6 +1025,20 @@
             WORK_REPORTS: 'api/work-reports'
         }
     };
+
+    function buildApiUrl(endpoint) {
+        if (!endpoint) {
+            return API_CONFIG.BASE_URL;
+        }
+
+        if (/^https?:\/\//i.test(endpoint)) {
+            return endpoint;
+        }
+
+        const normalizedBase = API_CONFIG.BASE_URL.replace(/\/+$/, '');
+        const normalizedPath = String(endpoint).replace(/^\/+/, '');
+        return `${normalizedBase}/${normalizedPath}`;
+    }
 
     // Переменные состояния
     let works = [];
@@ -1058,18 +1073,37 @@
         }
         
         try {
-            const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.LOGIN}`, {
+            const response = await fetch(buildApiUrl(API_CONFIG.ENDPOINTS.LOGIN), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({ username, password })
             });
-            
+
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                let errorMessage = 'Неверный логин или пароль';
+
+                try {
+                    const errorData = await response.json();
+
+                    if (errorData?.error) {
+                        errorMessage = errorData.error;
+                    } else if (errorData?.detail) {
+                        errorMessage = Array.isArray(errorData.detail)
+                            ? errorData.detail.map(item => item.msg || item).join(', ')
+                            : errorData.detail;
+                    }
+                } catch (parseError) {
+                    console.error('Login error parse failed:', parseError);
+                }
+
+                errorElement.textContent = errorMessage;
+                errorElement.style.display = 'block';
+                document.getElementById('password').value = '';
+                return;
             }
-            
+
             const data = await response.json();
             
             if (data.success) {
@@ -1159,7 +1193,8 @@
         }
         
         try {
-            const response = await fetch(`${API_CONFIG.BASE_URL}${endpoint}`, {
+            const url = buildApiUrl(endpoint);
+            const response = await fetch(url, {
                 headers,
                 ...options
             });
@@ -1635,7 +1670,7 @@
         try {
             showNotification('Добавление работы...', 'success');
             
-            const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.WORKS}`, {
+            const response = await fetch(buildApiUrl(API_CONFIG.ENDPOINTS.WORKS), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1712,7 +1747,7 @@
             
             showNotification('Обновление работы...', 'success');
             
-            const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.WORKS}/${workId}`, {
+            const response = await fetch(buildApiUrl(`${API_CONFIG.ENDPOINTS.WORKS}/${workId}`), {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1794,7 +1829,7 @@
             };
             
             try {
-                const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.WORKS}/${workId}`, {
+                const response = await fetch(buildApiUrl(`${API_CONFIG.ENDPOINTS.WORKS}/${workId}`), {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
@@ -2080,7 +2115,7 @@
         
         try {
             showNotification('Добавление категории...', 'success');
-            const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.CATEGORIES}`, {
+            const response = await fetch(buildApiUrl(API_CONFIG.ENDPOINTS.CATEGORIES), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -2134,7 +2169,7 @@
             if (!categoryToDelete) return;
             
             const categoryName = categoryToDelete.name;
-            const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.CATEGORIES}/${categoryId}`, {
+            const response = await fetch(buildApiUrl(`${API_CONFIG.ENDPOINTS.CATEGORIES}/${categoryId}`), {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -2206,7 +2241,7 @@
             
             showNotification('Добавление к балансу...', 'success');
             
-            const response = await fetch(`${API_CONFIG.BASE_URL}/api/works/${currentWorkIdForBalance}/add-balance`, {
+            const response = await fetch(buildApiUrl(`${API_CONFIG.ENDPOINTS.WORKS}/${currentWorkIdForBalance}/add-balance`), {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
