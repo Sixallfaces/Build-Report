@@ -888,10 +888,10 @@
                         <thead>
                             <tr>
                                 <th width="150">ID</th>
-                                <th>Имя</th>
-                                <th>Фамилия</th>
-                                <th>Username</th>
-                                <th width="200">Дата регистрации</th>
+                                <th>Фамилия и имя</th>
+                                <th>Должность</th>
+                                <th>Username</th>␊
+                                <th width="200">Дата регистрации</th>␊
                                 <th width="150">Доступ</th>
                                 <th width="200">Действия</th>
                             </tr>
@@ -987,6 +987,7 @@
                             <tr>
                                 <th width="50">ID</th>
                                 <th>Бригадир</th>
+                                <th>Должность</th>
                                 <th>Работа</th>
                                 <th width="100">Количество</th>
                                 <th width="120">Дата</th>
@@ -2312,15 +2313,15 @@
             tableBody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Нет данных о бригадирах</td></tr>';
             return;
         }
-        
+
         foremenToDisplay.forEach(foreman => {
             const row = document.createElement('tr');
-            row.innerHTML = `
-                <td><input type="text" value="${foreman.id}" readonly></td>
-                <td><input type="text" value="${foreman.имя}" class="editable" data-field="first_name"></td>
-                <td><input type="text" value="${foreman.фамилия}" class="editable" data-field="last_name"></td>
-                <td><input type="text" value="${foreman.username || ''}" class="editable" data-field="username"></td>
-                <td><input type="text" value="${foreman['дата регистрации']}" readonly></td>
+            row.innerHTML = `␊
+                <td><input type="text" value="${foreman.id}" readonly></td>␊
+                <td><input type="text" value="${foreman.full_name || ''}" class="editable" data-field="full_name"></td>
+                <td><input type="text" value="${foreman.position || ''}" class="editable" data-field="position"></td>
+                <td><input type="text" value="${foreman.username || ''}" class="editable" data-field="username"></td>␊
+                <td><input type="text" value="${foreman.registration_date || ''}" readonly></td>
                 <td>
                     <select class="editable" data-field="is_active">
                         <option value="1" ${foreman.is_active ? 'selected' : ''}>✅ Доступен</option>
@@ -2393,9 +2394,9 @@
     
     function filterForemen() {
         const searchTerm = document.getElementById('searchForemen').value.toLowerCase();
-        const filteredForemen = foremen.filter(foreman => 
-            foreman.имя.toLowerCase().includes(searchTerm) ||
-            foreman.фамилия.toLowerCase().includes(searchTerm) ||
+        const filteredForemen = foremen.filter(foreman =>
+            (foreman.full_name && foreman.full_name.toLowerCase().includes(searchTerm)) ||
+            (foreman.position && foreman.position.toLowerCase().includes(searchTerm)) ||
             (foreman.username && foreman.username.toLowerCase().includes(searchTerm))
         );
         displayForemen(filteredForemen);
@@ -2578,19 +2579,20 @@
         tableBody.innerHTML = '';
         
         if (reportsToDisplay.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="8" style="text-align: center;">Нет данных об отчетах</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="9" style="text-align: center;">Нет данных об отчетах</td></tr>';
             return;
         }
-        
+
         reportsToDisplay.forEach(report => {
-            const photoLink = report.photo_report_url ? 
-                `<a href="${report.photo_report_url}" target="_blank" style="color: var(--primary);">📷 Просмотреть</a>` : 
+            const photoLink = report.photo_report_url ?
+                `<a href="${report.photo_report_url}" target="_blank" style="color: var(--primary);">📷 Просмотреть</a>` :
                 'Нет фото';
-                
+
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${report.id}</td>
                 <td>${report.foreman_name || 'Неизвестно'}</td>
+                <td>${report.foreman_position || '—'}</td>
                 <td>${report.work_name || 'Неизвестно'}</td>
                 <td>${report.quantity} ${report.unit || 'шт'}</td>
                 <td>${report.report_date}</td>
@@ -2629,9 +2631,9 @@
     }
     
     function filterAllReports() {
-        const searchTerm = document.getElementById('searchAllReports').value.toLowerCase();
-        const filteredReports = allReports.filter(report => 
+        const filteredReports = allReports.filter(report =>
             (report.foreman_name && report.foreman_name.toLowerCase().includes(searchTerm)) ||
+            (report.foreman_position && report.foreman_position.toLowerCase().includes(searchTerm)) ||
             (report.work_name && report.work_name.toLowerCase().includes(searchTerm)) ||
             (report.report_date && report.report_date.toLowerCase().includes(searchTerm))
         );

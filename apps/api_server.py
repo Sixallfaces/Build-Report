@@ -196,18 +196,20 @@ async def get_foremen_from_db():
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                "SELECT id, first_name AS имя, last_name AS фамилия, username, registration_date AS дата_регистрации, is_active FROM foremen"
+                "SELECT id, first_name, last_name, username, registration_date, is_active FROM foremen"
             ) as cursor:
                 rows = await cursor.fetchall()
                 foremen = []
                 for row in rows:
-                    foreman_id, first_name, last_name, username, reg_date, is_active = row
+                    foreman_id, full_name, position, username, reg_date, is_active = row
                     foremen.append({
                         'id': foreman_id,
-                        'имя': first_name,
-                        'фамилия': last_name,
+                        'full_name': full_name,
+                        'position': position or '',
+                        'first_name': full_name,  # для обратной совместимости
+                        'last_name': position or '',
                         'username': username,
-                        'дата регистрации': reg_date,
+                        'registration_date': reg_date,
                         'is_active': bool(is_active) if is_active is not None else True
                     })
                 logger.info(f"👥 Найдено бригадиров в БД: {len(foremen)}")
@@ -222,12 +224,12 @@ async def create_foreman_in_db(foreman_data: dict):
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
                 "INSERT INTO foremen (first_name, last_name, username, registration_date, is_active) VALUES (?, ?, ?, ?, ?)",
-                (foreman_data['first_name'], foreman_data['last_name'], 
+                (foreman_data['full_name'], foreman_data['position'],
                  foreman_data.get('username', ''), datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 1)  # is_active = 1 по умолчанию
             )
             await db.commit()
             foreman_id = db.last_insert_rowid()
-            logger.info(f"👤 Добавлен новый бригадир: {foreman_data['first_name']} {foreman_data['last_name']} (ID: {foreman_id})")
+            logger.info(f"👤 Добавлен новый бригадир: {foreman_data['full_name']} ({foreman_data['position']}) (ID: {foreman_id})")
             return foreman_id
     except Exception as e:
         logger.error(f"❌ Ошибка добавления бригадира: {e}")
@@ -366,22 +368,24 @@ async def get_reports_for_date_from_db(target_date: str):
                 rows = await cursor.fetchall()
 
             grouped_reports = {}
-            for quantity, work_name, category, unit, first_name, last_name in rows:
-                foreman_name = f"{first_name} {last_name}".strip()
-                if foreman_name not in grouped_reports:
-                    grouped_reports[foreman_name] = []
-                grouped_reports[foreman_name].append({
+            for quantity, work_name, category, unit, full_name, position in rows:
+                if full_name not in grouped_reports:
+                    grouped_reports[full_name] = {
+                        'position': position,
+                        'works': []
+                    }
+                grouped_reports[full_name]['works'].append({
                     'name': work_name,
                     'quantity': quantity,
                     'unit': unit
                 })
 
             reports = []
-            for foreman, works in grouped_reports.items():
+            for foreman, info in grouped_reports.items():
                 reports.append({
                     'foreman': foreman,
-                    'works': works
-                })
+                    'position': info.get('position'),
+                    'works': info['works']                })
             logger.info(f"📊 Найдено отчетов за {target_date}: {len(reports)} бригадиров")
             return reports
     except Exception as e:
@@ -393,9 +397,10 @@ async def get_all_reports_from_db(date_filter=None):
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             query = '''
-                SELECT wr.id, wr.foreman_id, wr.work_id, wr.quantity, 
+                SELECT wr.id, wr.foreman_id, wr.work_id, wr.quantity,
                        wr.report_date, wr.report_time, wr.photo_report_url,
-                       f.first_name || ' ' || f.last_name as foreman_name,
+                       f.first_name as foreman_full_name,
+                       f.last_name as foreman_position,
                        w.name as work_name, w.unit
                 FROM work_reports wr
                 LEFT JOIN foremen f ON wr.foreman_id = f.id
@@ -413,8 +418,8 @@ async def get_all_reports_from_db(date_filter=None):
                 rows = await cursor.fetchall()
                 reports = []
                 for row in rows:
-                    (report_id, foreman_id, work_id, quantity, report_date, 
-                     report_time, photo_url, foreman_name, work_name, unit) = row
+                    (report_id, foreman_id, work_id, quantity, report_date,
+                     report_time, photo_url, foreman_full_name, foreman_position, work_name, unit) = row
                     reports.append({
                         'id': report_id,
                         'foreman_id': foreman_id,
@@ -423,7 +428,8 @@ async def get_all_reports_from_db(date_filter=None):
                         'report_date': report_date,
                         'report_time': report_time,
                         'photo_report_url': photo_url,
-                        'foreman_name': foreman_name,
+                        'foreman_name': foreman_full_name,
+                        'foreman_position': foreman_position,
                         'work_name': work_name,
                         'unit': unit
                     })
@@ -438,9 +444,10 @@ async def get_report_by_id(report_id: int):
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute('''
-                SELECT wr.id, wr.foreman_id, wr.work_id, wr.quantity, 
+                SELECT wr.id, wr.foreman_id, wr.work_id, wr.quantity,
                        wr.report_date, wr.report_time, wr.photo_report_url,
-                       f.first_name || ' ' || f.last_name as foreman_name,
+                       f.first_name as foreman_full_name,
+                        f.last_name as foreman_position,
                        w.name as work_name, w.unit
                 FROM work_reports wr
                 LEFT JOIN foremen f ON wr.foreman_id = f.id
@@ -449,8 +456,8 @@ async def get_report_by_id(report_id: int):
             ''', (report_id,)) as cursor:
                 row = await cursor.fetchone()
                 if row:
-                    (report_id, foreman_id, work_id, quantity, report_date, 
-                     report_time, photo_url, foreman_name, work_name, unit) = row
+                    (report_id, foreman_id, work_id, quantity, report_date,
+                     report_time, photo_url, foreman_full_name, foreman_position, work_name, unit) = row
                     return {
                         'id': report_id,
                         'foreman_id': foreman_id,
@@ -459,7 +466,8 @@ async def get_report_by_id(report_id: int):
                         'report_date': report_date,
                         'report_time': report_time,
                         'photo_report_url': photo_url,
-                        'foreman_name': foreman_name,
+                        'foreman_name': foreman_full_name,
+                        'foreman_position': foreman_position,
                         'work_name': work_name,
                         'unit': unit
                     }
@@ -1056,9 +1064,15 @@ async def create_foreman(request: Request):
     """Создает нового бригадира."""
     try:
         foreman_data = await request.json()
+
+        # Поддержка старых названий полей
+        if 'full_name' not in foreman_data and 'first_name' in foreman_data:
+            foreman_data['full_name'] = foreman_data['first_name']
+        if 'position' not in foreman_data and 'last_name' in foreman_data:
+            foreman_data['position'] = foreman_data['last_name']
         
         # Валидация
-        required_fields = ["first_name", "last_name"]
+        required_fields = ["full_name", "position"]
         for field in required_fields:
             if field not in foreman_data:
                 raise HTTPException(status_code=400, detail=f"Отсутствует поле: {field}")
@@ -1080,9 +1094,15 @@ async def update_foreman(foreman_id: int, request: Request):
     """Обновляет данные бригадира."""
     try:
         foreman_data = await request.json()
+
+        # Поддержка старых названий полей
+        if 'full_name' not in foreman_data and 'first_name' in foreman_data:
+            foreman_data['full_name'] = foreman_data['first_name']
+        if 'position' not in foreman_data and 'last_name' in foreman_data:
+            foreman_data['position'] = foreman_data['last_name']
         
         # Валидация
-        required_fields = ["first_name", "last_name", "is_active"]
+        required_fields = ["full_name", "position", "is_active"]
         for field in required_fields:
             if field not in foreman_data:
                 raise HTTPException(status_code=400, detail=f"Отсутствует поле: {field}")

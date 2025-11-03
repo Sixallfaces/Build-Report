@@ -13,7 +13,6 @@ import requests
 import logging
 import traceback
 import urllib.parse
-from collections import defaultdict
 import aiosqlite # Импортируем aiosqlite
 
 # Настройка логирования
@@ -46,8 +45,8 @@ dp = Dispatcher()
 
 # Состояния FSM
 class Form(StatesGroup):
-    waiting_name = State()
-    waiting_surname = State()
+    waiting_full_name = State()
+    waiting_position = State()
     selecting_action = State()
     selecting_work = State()
     entering_work_quantity = State()
@@ -133,11 +132,10 @@ async def get_foreman_info(user_id: int):
             ) as cursor:
                 row = await cursor.fetchone()
                 if row:
-                    name, surname = row
+                    full_name, position = row
                     return {
-                        'name': name,
-                        'surname': surname,
-                        'full_name': f"{name} {surname}".strip()
+                        'full_name': full_name,
+                        'position': position,
                     }
         return None
     except Exception as e:
@@ -158,16 +156,16 @@ async def is_user_registered(user_id: int):
         logger.warning(f"⚠️ Ошибка проверки регистрации: {e}")
         return False
 
-async def register_foreman(user_id: int, first_name: str, last_name: str, username: str):
+async def register_foreman(user_id: int, full_name: str, position: str, username: str):
     """Регистрирует нового бригадира в базе данных."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
                 "INSERT INTO foremen (id, first_name, last_name, username, registration_date, is_active) VALUES (?, ?, ?, ?, ?, ?)",
-                (user_id, first_name, last_name, username, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 1)  # is_active = 1 - сразу активен
+                (user_id, full_name, position, username, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 1)  # is_active = 1 - сразу активен
             )
             await db.commit()
-            logger.info(f"👤 Зарегистрирован новый бригадир: {first_name} {last_name} (ID: {user_id})")
+            logger.info(f"👤 Зарегистрирован новый бригадир: {first_name} {position} (ID: {user_id})")
             return True
     except Exception as e:
         logger.error(f"⚠️ Ошибка регистрации пользователя: {e}")
@@ -283,10 +281,14 @@ async def get_reports_for_date(target_date: str):
                 rows = await cursor.fetchall()
 
             # Группируем по бригадирам
-            grouped_reports = defaultdict(list)
-            for quantity, photo_url, work_name, category, unit, first_name, last_name in rows:
-                foreman_name = f"{first_name} {last_name}".strip()
-                grouped_reports[foreman_name].append({
+            grouped_reports = {}
+            for quantity, photo_url, work_name, category, unit, full_name, position in rows:
+                if full_name not in grouped_reports:
+                    grouped_reports[full_name] = {
+                        'position': position,
+                        'works': []
+                    }
+                grouped_reports[full_name]['works'].append({
                     'name': work_name,
                     'quantity': quantity,
                     'unit': unit
@@ -294,10 +296,11 @@ async def get_reports_for_date(target_date: str):
 
             # Формируем результат
             reports = []
-            for foreman, works in grouped_reports.items():
+            for foreman, info in grouped_reports.items():
                 reports.append({
                     'foreman': foreman,
-                    'works': works
+                    'position': info.get('position'),
+                    'works': info['works']
                 })
 
             logger.info(f"🔍 Найдено отчетов за {target_date}: {len(reports)} бригадиров")
@@ -565,10 +568,18 @@ async def upload_people_photo_to_yandex(photo_file, folder_path, filename):
     return await upload_photo_to_yandex(photo_file, folder_path, filename) # переиспользуем ту же логику
 
 # Проверка валидности имени
-def is_valid_name(name):
-    if not name or len(name) < 2 or len(name) > 20:
+def is_valid_full_name(full_name: str) -> bool:
+    full_name = (full_name or '').strip()
+    if len(full_name) < 3 or len(full_name) > 60:
         return False
-    return bool(re.match(r'^[a-zA-Zа-яА-ЯёЁ\- ]+$', name))
+    return bool(re.match(r'^[a-zA-Zа-яА-ЯёЁ\-\s]+$', full_name))
+
+
+def is_valid_position(position: str) -> bool:
+    position = (position or '').strip()
+    if len(position) < 2 or len(position) > 40:
+        return False
+    return bool(re.match(r'^[a-zA-Zа-яА-ЯёЁ0-9\-.,\s]+$', position))
 
 # === КЛАВИАТУРЫ ===
 def get_main_keyboard(user_id: int):
@@ -668,55 +679,55 @@ async def cmd_start(message: types.Message, state: FSMContext):
         )
         await state.set_state(Form.waiting_name)
 
-@dp.message(Form.waiting_name)
-async def process_name(message: types.Message, state: FSMContext):
-    name = message.text.strip()
-    logger.info(f"👤 Пользователь {message.from_user.id} ввел имя: {name}")
-    if not is_valid_name(name):
+@dp.message(Form.waiting_full_name)
+async def process_full_name(message: types.Message, state: FSMContext):
+    full_name = message.text.strip()
+    logger.info(f"👤 Пользователь {message.from_user.id} ввел ФИО: {full_name}")
+    if not is_valid_full_name(full_name):
         await message.answer(
-            "❌ Неверный формат имени.\n"
-            "Имя должно:\n"
-            "• Содержать только буквы\n"
-            "• Быть от 2 до 20 символов\n"
+            "❌ Неверный формат ФИО.\n"
+            "Фамилия и Имя должны:\n"
+            "• Содержать только буквы и дефисы\n"
+            "• Быть длиной от 3 до 60 символов\n"
             "• Не содержать цифры и специальные символы\n"
-            "📝 Пожалуйста, введите ваше Имя еще раз:"
+            "📝 Пожалуйста, введите ваше ФИО еще раз:"
         )
         return
     await state.update_data(first_name=name)
-    await message.answer("📝 Теперь введите вашу Фамилию:", reply_markup=get_back_keyboard())
-    await state.set_state(Form.waiting_surname)
+    await message.answer("📝 Теперь введите вашу Должность:", reply_markup=get_back_keyboard())
+    await state.set_state(Form.waiting_position)
 
-@dp.message(Form.waiting_surname)
-async def process_surname(message: types.Message, state: FSMContext):
+@dp.message(Form.waiting_position)
+async def process_position(message: types.Message, state: FSMContext):
     if message.text == '↩️ Назад':
-        await message.answer("📝 Пожалуйста, введите ваше Имя:", reply_markup=ReplyKeyboardRemove())
-        await state.set_state(Form.waiting_name)
+        await message.answer("📝 Пожалуйста, введите вашу Фамилию и Имя:", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(Form.waiting_full_name)
         return
-    surname = message.text.strip()
-    logger.info(f"👤 Пользователь {message.from_user.id} ввел фамилию: {surname}")
-    if not is_valid_name(surname):
+    position = message.text.strip()
+    logger.info(f"👤 Пользователь {message.from_user.id} ввел должность: {position}")
+    if not is_valid_position(position):
         await message.answer(
-            "❌ Неверный формат фамилии.\n"
-            "Фамилия должна:\n"
-            "• Содержать только буквы\n"
-            "• Быть от 2 до 20 символов\n"
-            "• Не содержать цифры и специальные символы\n"
-            "📝 Пожалуйста, введите вашу Фамилию еще раз:",
+            "❌ Неверный формат должности.\n"
+            "Должность должна:\n"
+            "• Быть длиной от 2 до 40 символов\n"
+            "• Содержать только буквы, цифры, пробелы и базовые знаки пунктуации\n"
+            "📝 Пожалуйста, введите вашу должность еще раз:",
             reply_markup=get_back_keyboard()
         )
         return
     user_data = await state.get_data()
-    first_name = user_data['first_name']
+    full_name = user_data['full_name']
     success = await register_foreman(
         message.from_user.id,
-        first_name,
-        surname,
+        full_name,
+        position,
         message.from_user.username
     )
     if success:
         await message.answer(
             f"✅ Регистрация в программе Стройконтроль завершена!\n"
-            f"👷 Добро пожаловать, {first_name} {surname}!\n"
+            f"👷 Добро пожаловать, {full_name}!\n"
+            f"💼 Должность: {position}\n"
             f"Теперь вы можете работать с системой отчетности.",
             reply_markup=get_main_keyboard(message.from_user.id)
         )
@@ -835,8 +846,12 @@ async def generate_manager_report(message: types.Message, state: FSMContext, tar
 
         for report_data in reports:
             foreman = report_data['foreman']
+            position = report_data.get('position')
             works = report_data['works']
-            report_lines.append(f"Бригадир: {foreman}")
+            header_line = f"Бригадир: {foreman}"
+            if position:
+                header_line += f" ({position})"
+            report_lines.append(header_line)
             for w in works:
                 work_name = w.get('name', '—')
                 quantity = w.get('quantity', '—')
@@ -912,14 +927,16 @@ async def handle_people_photo(message: types.Message, state: FSMContext):
 
             photo = message.photo[-1]
             timestamp = datetime.now().strftime('%H-%M-%S')
-            filename = f"{foreman_info['name']}_{foreman_info['surname']}_{current_date}_{timestamp}.jpg"
+            filename = f"{foreman_info['full_name']}_{foreman_info.get('position', '')}_{current_date}_{timestamp}.jpg"            
             filename = re.sub(r'[^\w\-_.]', '_', filename)
 
             photo_url = await upload_people_photo_to_yandex(photo, people_date_folder_path, filename)
 
+            position_text = foreman_info.get('position') or '—'
             await message.answer(
                 f"✅ Фотоотчет с людьми успешно загружен!\n"
                 f"👷 Бригадир: {foreman_info['full_name']}\n"
+                f"💼 Должность: {position_text}\n"
                 f"📅 Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
                 f"Фото сохранено в папке: {YANDEX_DISK_PEOPLE_REPORTS_FOLDER}",
                 reply_markup=get_main_keyboard(user_id)
@@ -1124,6 +1141,7 @@ async def save_report_with_photo(message: types.Message, state: FSMContext, phot
             await message.answer(
                 f"✅ Работа добавлена в отчет{photo_text}!\n"
                 f"👷 Бригадир: {foreman_info['full_name']}\n"
+                f"💼 Должность: {foreman_info.get('position') or '—'}\n"
                 f"🏗 Работа: {work_name}\n" # Используем имя
                 f"📊 Количество: {quantity} {unit}\n"
                 f"💰 Остаток: {result} {unit}\n"
