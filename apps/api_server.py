@@ -274,11 +274,10 @@ async def update_foreman_in_db(foreman_id: int, foreman_data: dict):
 
             )
             await db.commit()
-            if db.rowcount > 0:
-                logger.info(
-                    f"👤 Обновлен бригадир ID: {foreman_id}, is_active: {is_active}"
-                )
-                return True
+            logger.info(
+                f"👤 Обновлен бригадир ID: {foreman_id}, is_active: {is_active}"
+            )
+            return True
         return False
     except Exception as e:
         logger.error(f"❌ Ошибка обновления бригадира ID {foreman_id}: {e}")
@@ -297,9 +296,9 @@ async def delete_foreman_from_db(foreman_id: int):
                 if report_count and report_count[0] > 0:
                     return False, "Нельзя удалить бригадира, у которого есть отчеты"
             
-            await db.execute("DELETE FROM foremen WHERE id = ?", (foreman_id,))
+            cursor = await db.execute("DELETE FROM foremen WHERE id = ?", (foreman_id,))
             await db.commit()
-            if db.rowcount > 0:
+            if cursor.rowcount and cursor.rowcount > 0:
                 logger.info(f"🗑️ Удален бригадир ID: {foreman_id}")
                 return True, "Бригадир успешно удален"
         return False, "Бригадир не найден"
