@@ -1,0 +1,14 @@
+[Unit]
+Description=Stroykontrol Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/stroykontrol/app
+Environment=PATH=/opt/stroykontrol/venv/bin
+ExecStart=/opt/stroykontrol/venv/bin/python3 bot.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
