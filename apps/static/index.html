@@ -890,8 +890,8 @@
                                 <th width="150">ID</th>
                                 <th>Фамилия и имя</th>
                                 <th>Должность</th>
-                                <th>Username</th>␊
-                                <th width="200">Дата регистрации</th>␊
+                                <th>Username</th>
+                                <th width="200">Дата регистрации</th>
                                 <th width="150">Доступ</th>
                                 <th width="200">Действия</th>
                             </tr>
@@ -2316,11 +2316,11 @@
 
         foremenToDisplay.forEach(foreman => {
             const row = document.createElement('tr');
-            row.innerHTML = `␊
-                <td><input type="text" value="${foreman.id}" readonly></td>␊
+            row.innerHTML = `
+                <td><input type="text" value="${foreman.id}" readonly></td>
                 <td><input type="text" value="${foreman.full_name || ''}" class="editable" data-field="full_name"></td>
                 <td><input type="text" value="${foreman.position || ''}" class="editable" data-field="position"></td>
-                <td><input type="text" value="${foreman.username || ''}" class="editable" data-field="username"></td>␊
+                <td><input type="text" value="${foreman.username || ''}" class="editable" data-field="username"></td>
                 <td><input type="text" value="${foreman.registration_date || ''}" readonly></td>
                 <td>
                     <select class="editable" data-field="is_active">
