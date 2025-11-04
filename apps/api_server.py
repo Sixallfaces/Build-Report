@@ -439,7 +439,7 @@ async def insert_material_to_db(material_data: dict):
                 )
             )
             await db.commit()
-            material_id = db.last_insert_rowid()
+            material_id = cursor.lastrowid
             logger.info(f"📦 Добавлен новый материал: {material_data['name']} (ID: {material_id})")
             return material_id
     except Exception as e:
