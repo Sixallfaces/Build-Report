@@ -428,7 +428,7 @@ async def insert_material_to_db(material_data: dict):
     """Добавляет новый материал"""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute(
+            cursor = await db.execute(
                 "INSERT INTO materials (category, name, unit, quantity, created_at) VALUES (?, ?, ?, ?, ?)",
                 (
                     material_data['category'],
