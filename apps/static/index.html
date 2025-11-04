@@ -793,6 +793,7 @@
             
             <div class="tabs">
                 <button class="tab active" data-tab="works">🏗️ Работы и материалы</button>
+                <button class="tab" data-tab="materials">📦 Склад</button>
                 <button class="tab" data-tab="foremen">👷 Бригадиры</button>
                 <button class="tab" data-tab="accumulative">📦 Накопительная ведомость</button>
                 <button class="tab" data-tab="all-reports">📋 Все отчеты</button>
@@ -848,7 +849,41 @@
                     </table>
                 </div>
             </div>
-            
+
+            <!-- Вкладка склада -->
+            <div id="materials" class="tab-content">
+                <h2>Склад материалов</h2>
+
+                <div class="toolbar">
+                    <button id="addMaterial" class="success">➕ Добавить материал</button>
+                    <button id="exportMaterials" class="secondary">📥 Выгрузка данных</button>
+                    <button id="importMaterials" class="secondary">📤 Загрузка на сервер</button>
+                    <button id="downloadMaterialsTemplate" class="secondary">📄 Шаблон Excel</button>
+                    <input type="file" id="materialsImportInput" accept=".xlsx,.xls" style="display: none;">
+                    <div class="search-box">
+                        <input type="text" id="searchMaterials" placeholder="Поиск по материалам...">
+                    </div>
+                </div>
+
+                <div class="loading" id="materialsLoading">Загрузка...</div>
+
+                <div class="table-container">
+                    <table id="materialsTable">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Категория</th>
+                                <th>Наименование</th>
+                                <th>Ед. изм.</th>
+                                <th>Кол-во</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="materialsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- Вкладка бригадиров -->
             <div id="foremen" class="tab-content">
                <h2>Управление бригадирами</h2>
@@ -1016,6 +1051,10 @@
         ENDPOINTS: {
             WORKS: 'api/works',
             ALL_WORKS: 'api/all-works',
+            MATERIALS: 'api/materials',
+            MATERIALS_EXPORT: 'api/materials/export',
+            MATERIALS_IMPORT: 'api/materials/import',
+            MATERIALS_TEMPLATE: 'api/materials/template',
             FOREMEN: 'api/foremen',
             REPORTS: 'api/reports',
             ALL_REPORTS: 'api/all-reports',
@@ -1043,6 +1082,7 @@
 
     // Переменные состояния
     let works = [];
+    let materials = [];
     let foremen = [];
     let reports = [];
     let allReports = [];
@@ -1250,13 +1290,15 @@
     function initializeApp() {
         initializeTabs();
         initializeWorksTab();
+        initializeMaterialsTab();
         initializeForemenTab();
         initializeReportsTab();
         initializeAllReportsTab();
         initializeAccumulativeTab();
-        
+
         // Загрузка данных
         loadWorks();
+        loadMaterials();
         loadForemen();
         loadReports();
         loadAllReports();
@@ -1281,6 +1323,8 @@
                 // Загружать данные при переключении на определенные вкладки
                 if (tabId === 'accumulative') {
                     loadAccumulativeStatement();
+                } else if (tabId === 'materials') {
+                    loadMaterials();
                 }
             });
         });
@@ -1292,12 +1336,28 @@
         document.getElementById('addCategory').addEventListener('click', openCategoryModal);
         document.getElementById('saveAllWorks').addEventListener('click', saveAllWorks);
         document.getElementById('searchWorks').addEventListener('input', filterWorks);
-        
+
         document.getElementById('exportWorks').addEventListener('click', exportWorksToExcel);
         document.getElementById('importWorks').addEventListener('click', triggerImportWorks);
         document.getElementById('importFileInput').addEventListener('change', handleWorksImport);
     }
-    
+
+    function initializeMaterialsTab() {
+        const addMaterialBtn = document.getElementById('addMaterial');
+        const exportMaterialsBtn = document.getElementById('exportMaterials');
+        const importMaterialsBtn = document.getElementById('importMaterials');
+        const templateMaterialsBtn = document.getElementById('downloadMaterialsTemplate');
+        const importInput = document.getElementById('materialsImportInput');
+        const searchInput = document.getElementById('searchMaterials');
+
+        if (addMaterialBtn) addMaterialBtn.addEventListener('click', addNewMaterial);
+        if (exportMaterialsBtn) exportMaterialsBtn.addEventListener('click', exportMaterialsToExcel);
+        if (importMaterialsBtn) importMaterialsBtn.addEventListener('click', triggerImportMaterials);
+        if (templateMaterialsBtn) templateMaterialsBtn.addEventListener('click', downloadMaterialsTemplate);
+        if (importInput) importInput.addEventListener('change', handleMaterialsImport);
+        if (searchInput) searchInput.addEventListener('input', filterMaterials);
+    }
+
     // Инициализация вкладки бригадиров
     function initializeForemenTab() {
         document.getElementById('saveAllForemen').addEventListener('click', saveAllForemen);
@@ -2058,7 +2118,373 @@
         
         showNotification(resultMessage, errors.length > 0 ? 'error' : 'success');
     }
-    
+
+    // ========== МАТЕРИАЛЫ ==========
+
+    async function loadMaterials() {
+        const loadingElement = document.getElementById('materialsLoading');
+        const tableBody = document.getElementById('materialsTableBody');
+
+        if (!loadingElement || !tableBody) return;
+
+        loadingElement.style.display = 'block';
+        tableBody.innerHTML = '';
+
+        try {
+            const data = await makeApiRequest(API_CONFIG.ENDPOINTS.MATERIALS);
+            if (data.success) {
+                materials = data.data || [];
+                displayMaterials(materials);
+            } else {
+                showNotification('Ошибка при загрузке материалов: ' + (data.error || 'Неизвестная ошибка'), 'error');
+            }
+        } catch (error) {
+            showNotification('Ошибка при загрузке материалов: ' + error.message, 'error');
+        } finally {
+            loadingElement.style.display = 'none';
+        }
+    }
+
+    function displayMaterials(materialsToDisplay = materials) {
+        const tableBody = document.getElementById('materialsTableBody');
+        if (!tableBody) return;
+
+        tableBody.innerHTML = '';
+
+        if (!materialsToDisplay || materialsToDisplay.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Нет данных о материалах</td></tr>';
+            return;
+        }
+
+        materialsToDisplay.forEach(material => {
+            const row = document.createElement('tr');
+            row.setAttribute('data-material-id', material.id);
+            const quantityValue = material.quantity !== undefined && material.quantity !== null ? Number(material.quantity) : 0;
+
+            const categoryOptions = [
+                ...categories.map(cat => `<option value="${cat.name}" ${cat.name === material.category ? 'selected' : ''}>${cat.name}</option>`)
+            ];
+            if (!categories.find(cat => cat.name === material.category) && material.category) {
+                categoryOptions.push(`<option value="${material.category}" selected>${material.category}</option>`);
+            }
+            if (!material.category) {
+                categoryOptions.unshift('<option value="" selected>Не выбрано</option>');
+            }
+
+            const unitOptions = [
+                ...UNITS.map(unit => `<option value="${unit}" ${unit === material.unit ? 'selected' : ''}>${unit}</option>`)
+            ];
+            if (material.unit && !UNITS.includes(material.unit)) {
+                unitOptions.push(`<option value="${material.unit}" selected>${material.unit}</option>`);
+            }
+            if (!material.unit) {
+                unitOptions.unshift('<option value="" selected>Не выбрано</option>');
+            }
+
+            row.innerHTML = `
+                <td><input type="text" value="${material.id}" readonly></td>
+                <td>
+                    <select class="editable" data-field="category">
+                        ${categoryOptions.join('')}
+                    </select>
+                </td>
+                <td><input type="text" value="${material.name || ''}" class="editable" data-field="name"></td>
+                <td>
+                    <select class="editable" data-field="unit">
+                        ${unitOptions.join('')}
+                    </select>
+                </td>
+                <td><input type="number" value="${quantityValue}" class="editable" data-field="quantity" step="0.01" min="0"></td>
+                <td class="action-buttons">
+                    <button onclick="saveMaterial(${material.id})" class="secondary">💾</button>
+                    <button onclick="deleteMaterial(${material.id})" class="danger">🗑️</button>
+                </td>
+            `;
+
+            tableBody.appendChild(row);
+        });
+    }
+
+    function filterMaterials(event) {
+        const query = (event.target.value || '').toLowerCase();
+
+        if (!query) {
+            displayMaterials(materials);
+            return;
+        }
+
+        const filtered = materials.filter(material => {
+            return [
+                material.id,
+                material.name,
+                material.category,
+                material.unit,
+                material.quantity
+            ].some(value => value !== undefined && value !== null && String(value).toLowerCase().includes(query));
+        });
+
+        displayMaterials(filtered);
+    }
+
+    function addNewMaterial() {
+        const tableBody = document.getElementById('materialsTableBody');
+        if (!tableBody) return;
+
+        if (tableBody.innerHTML.includes('Нет данных о материалах')) {
+            tableBody.innerHTML = '';
+        }
+
+        const row = document.createElement('tr');
+        const categoryOptions = categories.length > 0
+            ? categories.map(cat => `<option value="${cat.name}">${cat.name}</option>`).join('')
+            : '<option value="">Не выбрано</option>';
+
+        row.innerHTML = `
+            <td><input type="text" value="новый" readonly></td>
+            <td>
+                <select class="editable" data-field="category">
+                    ${categoryOptions}
+                </select>
+            </td>
+            <td><input type="text" class="editable" data-field="name" placeholder="Название материала"></td>
+            <td>
+                <select class="editable" data-field="unit">
+                    ${UNITS.map(unit => `<option value="${unit}">${unit}</option>`).join('')}
+                </select>
+            </td>
+            <td><input type="number" value="0" class="editable" data-field="quantity" step="0.01" min="0"></td>
+            <td class="action-buttons">
+                <button onclick="saveNewMaterial(this)" class="success">➕ Создать</button>
+                <button onclick="removeNewMaterial(this)" class="danger">❌</button>
+            </td>
+        `;
+
+        tableBody.prepend(row);
+    }
+
+    function removeNewMaterial(button) {
+        const row = button.closest('tr');
+        if (row) {
+            row.remove();
+        }
+
+        const tableBody = document.getElementById('materialsTableBody');
+        if (tableBody && tableBody.children.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Нет данных о материалах</td></tr>';
+        }
+    }
+
+    async function saveNewMaterial(button) {
+        const row = button.closest('tr');
+        const inputs = row.querySelectorAll('.editable');
+
+        const materialData = {};
+        inputs.forEach(input => {
+            const field = input.getAttribute('data-field');
+            materialData[field] = input.value;
+        });
+
+        if (!materialData.name || !materialData.category || !materialData.unit) {
+            showNotification('Заполните все обязательные поля для материала', 'error');
+            return;
+        }
+
+        materialData.quantity = parseFloat(materialData.quantity) || 0;
+        if (materialData.quantity < 0) {
+            showNotification('Количество не может быть отрицательным', 'error');
+            return;
+        }
+
+        try {
+            const response = await makeApiRequest(API_CONFIG.ENDPOINTS.MATERIALS, {
+                method: 'POST',
+                body: JSON.stringify(materialData)
+            });
+
+            if (response && response.success) {
+                showNotification('Материал успешно добавлен', 'success');
+                await loadMaterials();
+            } else {
+                const errorMessage = response?.detail || response?.error || 'Не удалось добавить материал';
+                showNotification(errorMessage, 'error');
+            }
+        } catch (error) {
+            showNotification('Ошибка при добавлении материала: ' + error.message, 'error');
+        }
+    }
+
+    async function saveMaterial(materialId) {
+        const row = document.querySelector(`#materialsTableBody tr[data-material-id="${materialId}"]`);
+        if (!row) {
+            showNotification('Строка материала не найдена', 'error');
+            return;
+        }
+
+        const inputs = row.querySelectorAll('.editable');
+        const materialData = {};
+        inputs.forEach(input => {
+            const field = input.getAttribute('data-field');
+            materialData[field] = input.value;
+        });
+
+        if (!materialData.name || !materialData.category || !materialData.unit) {
+            showNotification('Заполните все обязательные поля для материала', 'error');
+            return;
+        }
+
+        materialData.quantity = parseFloat(materialData.quantity);
+        if (isNaN(materialData.quantity) || materialData.quantity < 0) {
+            showNotification('Количество должно быть числом больше или равным нулю', 'error');
+            return;
+        }
+
+        try {
+            const response = await makeApiRequest(`${API_CONFIG.ENDPOINTS.MATERIALS}/${materialId}`, {
+                method: 'PUT',
+                body: JSON.stringify(materialData)
+            });
+
+            if (response && response.success) {
+                showNotification('Материал успешно обновлен', 'success');
+                await loadMaterials();
+            } else {
+                const errorMessage = response?.detail || response?.error || 'Не удалось обновить материал';
+                showNotification(errorMessage, 'error');
+            }
+        } catch (error) {
+            showNotification('Ошибка при обновлении материала: ' + error.message, 'error');
+        }
+    }
+
+    async function deleteMaterial(materialId) {
+        if (!confirm('Вы уверены, что хотите удалить этот материал?')) {
+            return;
+        }
+
+        try {
+            const response = await makeApiRequest(`${API_CONFIG.ENDPOINTS.MATERIALS}/${materialId}`, {
+                method: 'DELETE'
+            });
+
+            if (response && response.success) {
+                showNotification('Материал успешно удален', 'success');
+                await loadMaterials();
+            } else {
+                const errorMessage = response?.detail || response?.error || 'Не удалось удалить материал';
+                showNotification(errorMessage, 'error');
+            }
+        } catch (error) {
+            showNotification('Ошибка при удалении материала: ' + error.message, 'error');
+        }
+    }
+
+    async function exportMaterialsToExcel() {
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(buildApiUrl(API_CONFIG.ENDPOINTS.MATERIALS_EXPORT), {
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || 'Ошибка скачивания файла');
+            }
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `materials_export_${new Date().toISOString().split('T')[0]}.xlsx`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+
+            showNotification('Файл успешно скачан', 'success');
+        } catch (error) {
+            showNotification('Ошибка при экспорте материалов: ' + error.message, 'error');
+        }
+    }
+
+    function triggerImportMaterials() {
+        const importInput = document.getElementById('materialsImportInput');
+        if (importInput) {
+            importInput.click();
+        }
+    }
+
+    async function handleMaterialsImport(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        event.target.value = '';
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const token = localStorage.getItem('token');
+            const response = await fetch(buildApiUrl(API_CONFIG.ENDPOINTS.MATERIALS_IMPORT), {
+                method: 'POST',
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+                body: formData
+            });
+
+            const responseText = await response.text();
+            let result = {};
+            try {
+                result = responseText ? JSON.parse(responseText) : {};
+            } catch (parseError) {
+                throw new Error('Не удалось обработать ответ сервера');
+            }
+
+            if (!response.ok || !result.success) {
+                const errorMessage = result.detail || result.error || 'Ошибка при импорте материалов';
+                throw new Error(errorMessage);
+            }
+
+            await loadMaterials();
+
+            let message = result.message || 'Импорт успешно выполнен';
+            if (result.errors && result.errors.length > 0) {
+                message += `. Ошибок: ${result.errors.length}`;
+                console.warn('Ошибки импорта материалов:', result.errors);
+                showNotification(message, 'warning');
+            } else {
+                showNotification(message, 'success');
+            }
+        } catch (error) {
+            showNotification('Ошибка при импорте материалов: ' + error.message, 'error');
+        }
+    }
+
+    async function downloadMaterialsTemplate() {
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(buildApiUrl(API_CONFIG.ENDPOINTS.MATERIALS_TEMPLATE), {
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || 'Ошибка скачивания шаблона');
+            }
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'materials_template.xlsx';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+
+            showNotification('Шаблон успешно скачан', 'success');
+        } catch (error) {
+            showNotification('Ошибка при скачивании шаблона: ' + error.message, 'error');
+        }
+    }
+
     // ========== КАТЕГОРИИ ==========
     async function loadCategories() {
         try {
@@ -2068,6 +2494,7 @@
                 if (document.getElementById('works').classList.contains('active')) {
                     await loadWorks();
                 }
+                displayMaterials(materials);
             } else {
                 showNotification('Ошибка при загрузке категорий: ' + data.error, 'error');
             }

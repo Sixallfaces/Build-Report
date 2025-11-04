@@ -358,6 +358,130 @@ async def create_category_in_db(category_data: dict):
     except Exception as e:
         logger.error(f"⚠️ Ошибка добавления категории: {e}")
         return None
+    
+    # ========== ФУНКЦИИ ДЛЯ МАТЕРИАЛОВ ==========
+async def init_materials_table():
+    """Создает таблицу для материалов склада"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS materials (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL,
+                name TEXT NOT NULL,
+                unit TEXT NOT NULL,
+                quantity REAL NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+        ''')
+        await db.commit()
+
+async def get_all_materials_from_db():
+    """Получает список всех материалов"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT id, category, name, unit, quantity, created_at FROM materials ORDER BY name"
+            ) as cursor:
+                rows = await cursor.fetchall()
+                materials = []
+                for row in rows:
+                    material_id, category, name, unit, quantity, created_at = row
+                    materials.append({
+                        'id': material_id,
+                        'category': category,
+                        'name': name,
+                        'unit': unit,
+                        'quantity': quantity,
+                        'created_at': created_at
+                    })
+                logger.info(f"📦 Найдено материалов в БД: {len(materials)}")
+                return materials
+    except Exception as e:
+        logger.error(f"⚠️ Ошибка получения материалов: {e}")
+        return []
+
+async def get_material_by_id(material_id: int):
+    """Получает материал по ID"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT id, category, name, unit, quantity, created_at FROM materials WHERE id = ?",
+                (material_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    material_id, category, name, unit, quantity, created_at = row
+                    return {
+                        'id': material_id,
+                        'category': category,
+                        'name': name,
+                        'unit': unit,
+                        'quantity': quantity,
+                        'created_at': created_at
+                    }
+        return None
+    except Exception as e:
+        logger.error(f"⚠️ Ошибка получения материала ID {material_id}: {e}")
+        return None
+
+async def insert_material_to_db(material_data: dict):
+    """Добавляет новый материал"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO materials (category, name, unit, quantity, created_at) VALUES (?, ?, ?, ?, ?)",
+                (
+                    material_data['category'],
+                    material_data['name'],
+                    material_data['unit'],
+                    material_data['quantity'],
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                )
+            )
+            await db.commit()
+            material_id = db.last_insert_rowid()
+            logger.info(f"📦 Добавлен новый материал: {material_data['name']} (ID: {material_id})")
+            return material_id
+    except Exception as e:
+        logger.error(f"⚠️ Ошибка добавления материала {material_data}: {e}")
+        raise
+
+async def update_material_in_db(material_id: int, material_data: dict):
+    """Обновляет материал"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute(
+                "UPDATE materials SET category = ?, name = ?, unit = ?, quantity = ? WHERE id = ?",
+                (
+                    material_data['category'],
+                    material_data['name'],
+                    material_data['unit'],
+                    material_data['quantity'],
+                    material_id
+                )
+            )
+            await db.commit()
+            if cursor.rowcount and cursor.rowcount > 0:
+                logger.info(f"📦 Обновлен материал ID: {material_id}")
+                return True
+        return False
+    except Exception as e:
+        logger.error(f"⚠️ Ошибка обновления материала ID {material_id}: {e}")
+        return False
+
+async def delete_material_from_db(material_id: int):
+    """Удаляет материал"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute("DELETE FROM materials WHERE id = ?", (material_id,))
+            await db.commit()
+            if cursor.rowcount and cursor.rowcount > 0:
+                logger.info(f"🗑️ Удален материал ID: {material_id}")
+                return True
+        return False
+    except Exception as e:
+        logger.error(f"⚠️ Ошибка удаления материала ID {material_id}: {e}")
+        return False
 
 async def delete_category_from_db(category_id: int):
     """Удаляет категорию из базы данных."""
@@ -753,6 +877,8 @@ async def init_site_users_table():
 @app.on_event("startup")
 async def startup_event():
     await init_site_users_table()
+    await init_categories_table()
+    await init_materials_table()
 
 
 @app.get("/api/works/export")
@@ -871,6 +997,132 @@ async def import_works(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Ошибка импорта работ: {str(e)}")
 
 
+@app.get("/api/materials/export")
+async def export_materials():
+    """Экспорт материалов в Excel файл"""
+    try:
+        materials = await get_all_materials_from_db()
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Материалы"
+
+        headers = ["ID", "Категория", "Название материала", "Единица измерения", "Количество"]
+        ws.append(headers)
+
+        for material in materials:
+            row = [
+                material['id'],
+                material['category'],
+                material['name'],
+                material['unit'],
+                material['quantity']
+            ]
+            ws.append(row)
+
+        file_stream = io.BytesIO()
+        wb.save(file_stream)
+        file_stream.seek(0)
+
+        return StreamingResponse(
+            file_stream,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=materials_export.xlsx"}
+        )
+    except Exception as e:
+        logger.error(f"❌ Ошибка экспорта материалов: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка экспорта материалов")
+
+
+@app.get("/api/materials/template")
+async def download_materials_template():
+    """Скачивание шаблона Excel для материалов"""
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Материалы"
+
+        headers = ["ID", "Категория", "Название материала", "Единица измерения", "Количество"]
+        ws.append(headers)
+        ws.append(["", "Категория", "Пример материала", "шт", 0])
+
+        file_stream = io.BytesIO()
+        wb.save(file_stream)
+        file_stream.seek(0)
+
+        return StreamingResponse(
+            file_stream,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=materials_template.xlsx"}
+        )
+    except Exception as e:
+        logger.error(f"❌ Ошибка формирования шаблона материалов: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка формирования шаблона")
+
+
+@app.post("/api/materials/import")
+async def import_materials(file: UploadFile = File(...)):
+    """Импорт материалов из Excel"""
+    try:
+        if not file.filename.endswith(('.xlsx', '.xls')):
+            raise HTTPException(status_code=400, detail="Поддерживаются только файлы Excel (.xlsx, .xls)")
+
+        contents = await file.read()
+        wb = openpyxl.load_workbook(io.BytesIO(contents))
+        ws = wb.active
+
+        imported_count = 0
+        updated_count = 0
+        errors = []
+
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row or not any(row):
+                continue
+
+            try:
+                material_id, category, name, unit, quantity = row
+
+                if not category or not name or not unit:
+                    errors.append(f"Пропущены обязательные поля в строке: {row}")
+                    continue
+
+                material_payload = {
+                    'category': str(category).strip(),
+                    'name': str(name).strip(),
+                    'unit': str(unit).strip(),
+                    'quantity': float(quantity) if quantity is not None else 0
+                }
+
+                if material_id:
+                    existing_material = await get_material_by_id(int(material_id))
+                    if existing_material:
+                        success = await update_material_in_db(int(material_id), material_payload)
+                        if success:
+                            updated_count += 1
+                        else:
+                            errors.append(f"Ошибка обновления материала ID {material_id}")
+                        continue
+
+                await insert_material_to_db(material_payload)
+                imported_count += 1
+
+            except Exception as exc:
+                errors.append(f"Ошибка обработки строки {row}: {str(exc)}")
+
+        return {
+            "success": True,
+            "message": f"Импорт завершен. Добавлено: {imported_count}, обновлено: {updated_count}",
+            "errors": errors,
+            "imported_count": imported_count,
+            "updated_count": updated_count,
+            "error_count": len(errors)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Ошибка импорта материалов: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка импорта материалов: {str(e)}")
+
 # Эндпоинты аутентификации
 
 @app.post("/api/site-login")
@@ -978,6 +1230,8 @@ async def delete_category(category_id: int):
 async def startup_event():
     await init_site_users_table()
     await init_categories_table()
+    await init_materials_table()
+
 
 # Эндпоинты для работ
 
@@ -1081,6 +1335,96 @@ async def delete_work(work_id: int):
         return {"success": True, "message": "Работа успешно удалена"}
     else:
         raise HTTPException(status_code=500, detail="Ошибка при удалении работы из БД")
+
+# Эндпоинты для материалов склада
+@app.get("/api/materials")
+async def get_materials():
+    materials = await get_all_materials_from_db()
+    return {"success": True, "data": materials}
+
+
+@app.get("/api/materials/{material_id}")
+async def get_material(material_id: int):
+    material = await get_material_by_id(material_id)
+    if material is None:
+        raise HTTPException(status_code=404, detail="Материал не найден")
+    return {"success": True, "data": material}
+
+
+@app.post("/api/materials")
+async def create_material(request: Request):
+    try:
+        material_data = await request.json()
+
+        required_fields = ["name", "category", "unit", "quantity"]
+        for field in required_fields:
+            if field not in material_data or (isinstance(material_data[field], str) and not material_data[field].strip()):
+                raise HTTPException(status_code=400, detail=f"Отсутствует поле: {field}")
+
+        try:
+            material_data['quantity'] = float(material_data['quantity'])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="quantity должно быть числом")
+
+        if material_data['quantity'] < 0:
+            raise HTTPException(status_code=400, detail="quantity должно быть >= 0")
+
+        material_id = await insert_material_to_db(material_data)
+        created_material = await get_material_by_id(material_id)
+        return {"success": True, "message": "Материал успешно добавлен", "data": created_material}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Ошибка при создании материала: {e}")
+        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
+
+
+@app.put("/api/materials/{material_id}")
+async def update_material(material_id: int, request: Request):
+    existing_material = await get_material_by_id(material_id)
+    if existing_material is None:
+        raise HTTPException(status_code=404, detail="Материал не найден для обновления")
+
+    try:
+        material_data = await request.json()
+
+        required_fields = ["name", "category", "unit", "quantity"]
+        for field in required_fields:
+            if field not in material_data or (isinstance(material_data[field], str) and not material_data[field].strip()):
+                raise HTTPException(status_code=400, detail=f"Отсутствует поле: {field}")
+
+        try:
+            material_data['quantity'] = float(material_data['quantity'])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="quantity должно быть числом")
+
+        if material_data['quantity'] < 0:
+            raise HTTPException(status_code=400, detail="quantity должно быть >= 0")
+
+        success = await update_material_in_db(material_id, material_data)
+        if success:
+            updated_material = await get_material_by_id(material_id)
+            return {"success": True, "message": "Материал успешно обновлен", "data": updated_material}
+        else:
+            raise HTTPException(status_code=500, detail="Ошибка при обновлении материала в БД")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Ошибка при обновлении материала ID {material_id}: {e}")
+        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
+
+
+@app.delete("/api/materials/{material_id}")
+async def delete_material(material_id: int):
+    existing_material = await get_material_by_id(material_id)
+    if existing_material is None:
+        raise HTTPException(status_code=404, detail="Материал не найден для удаления")
+
+    success = await delete_material_from_db(material_id)
+    if success:
+        return {"success": True, "message": "Материал успешно удален"}
+    else:
+        raise HTTPException(status_code=500, detail="Ошибка при удалении материала из БД")
 
 # Эндпоинты для бригадиров
 @app.get("/api/foremen")
