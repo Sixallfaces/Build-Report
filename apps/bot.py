@@ -48,6 +48,7 @@ class Form(StatesGroup):
     waiting_full_name = State()
     waiting_position = State()
     selecting_action = State()
+    selecting_category = State()
     selecting_work = State()
     entering_work_quantity = State()
     waiting_photo = State()
@@ -682,6 +683,11 @@ def get_back_keyboard():
         resize_keyboard=True
     )
 
+def get_category_keyboard(categories):
+    keyboard = [[KeyboardButton(text=category)] for category in categories]
+    keyboard.append([KeyboardButton(text='↩️ Назад')])
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
 # НОВЫЕ КЛАВИАТУРЫ ДЛЯ РУКОВОДИТЕЛЯ
 def get_manager_report_keyboard():
     return ReplyKeyboardMarkup(
@@ -814,13 +820,12 @@ async def handle_main_menu(message: types.Message, state: FSMContext):
         if not works:
             await message.answer("📝 Нет доступных работ для отчета. Обратитесь к администратору.")
             return
-        keyboard = [[KeyboardButton(text=work['Название работы'])] for work in works]
-        keyboard.append([KeyboardButton(text='📤 Завершить отчет')])
-        keyboard.append([KeyboardButton(text='↩️ Назад')])
-        await state.update_data(works=works)
-        reply_markup = ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
-        await message.answer("Выберите выполненную работу:", reply_markup=reply_markup)
-        await state.set_state(Form.selecting_work)
+        for work in works:
+            work['Категория'] = work.get('Категория') or 'Без категории'
+        categories = sorted({work['Категория'] for work in works})
+        await state.update_data(works=works, categories=categories, selected_category=None)
+        await message.answer("Выберите раздел:", reply_markup=get_category_keyboard(categories))
+        await state.set_state(Form.selecting_category)
     elif text == '👥 Отправить фото отчет (Люди)':
         await message.answer(
             "👥 Вы выбрали отправку фотоотчета с людьми.\n"
@@ -851,6 +856,64 @@ async def handle_main_menu(message: types.Message, state: FSMContext):
         🔧 По всем вопросам обращайтесь к администратору.
         """
         await message.answer(help_text)
+
+
+@dp.message(Form.selecting_category)
+async def handle_category_selection(message: types.Message, state: FSMContext):
+    if message.text == '↩️ Назад':
+        data = await state.get_data()
+        categories = data.get('categories', [])
+        await state.update_data(selected_work_id=None, selected_work_name=None, selected_category=None)
+        if categories:
+            await message.answer("Выберите раздел:", reply_markup=get_category_keyboard(categories))
+            await state.set_state(Form.selecting_category)
+        else:
+            await message.answer("Главное меню:", reply_markup=get_main_keyboard(message.from_user.id))
+            await state.set_state(Form.selecting_action)
+        return
+
+    data = await state.get_data()
+    categories = data.get('categories', [])
+    works = data.get('works', [])
+
+    selected_category = next((c for c in categories if c.lower() == message.text.strip().lower()), None)
+    if not selected_category:
+        if categories:
+            available_categories = "\n".join([f"• {category}" for category in categories])
+            await message.answer(
+                "❌ Такой раздел не найден.\nДоступные разделы:\n" + available_categories,
+                reply_markup=get_category_keyboard(categories)
+            )
+        else:
+            await message.answer(
+                "❌ Нет доступных разделов. Возврат в главное меню.",
+                reply_markup=get_main_keyboard(message.from_user.id)
+            )
+            await state.set_state(Form.selecting_action)
+        return
+
+    category_works = [
+        work for work in works
+        if (work.get('Категория') or 'Без категории').lower() == selected_category.lower()
+    ]
+
+    if not category_works:
+        await message.answer(
+            "❌ В выбранном разделе нет активных работ. Выберите другой раздел:",
+            reply_markup=get_category_keyboard(categories)
+        )
+        return
+
+    await state.update_data(selected_category=selected_category)
+    keyboard = [[KeyboardButton(text=work['Название работы'])] for work in category_works]
+    keyboard.append([KeyboardButton(text='📤 Завершить отчет')])
+    keyboard.append([KeyboardButton(text='↩️ Назад')])
+    await message.answer(
+        "Выберите выполненную работу:",
+        reply_markup=ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+    )
+    await state.set_state(Form.selecting_work)
+
 
 # НОВЫЕ ОБРАБОТЧИКИ ДЛЯ РУКОВОДИТЕЛЯ
 @dp.message(Form.manager_selecting_report_type)
@@ -1033,7 +1096,22 @@ async def handle_work_selection(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
     works = data.get('works', [])
-    selected_work = next((w for w in works if w['Название работы'].strip().lower() == message.text.strip().lower()), None)
+    selected_category = data.get('selected_category')
+    categories = data.get('categories', [])
+    category_works = works
+    if selected_category:
+        category_works = [
+            w for w in works
+            if (w.get('Категория') or 'Без категории').lower() == selected_category.lower()
+        ]
+    if selected_category and not category_works:
+        await message.answer(
+            "❌ В выбранном разделе нет активных работ. Выберите другой раздел:",
+            reply_markup=get_category_keyboard(categories)
+        )
+        await state.set_state(Form.selecting_category)
+        return
+    selected_work = next((w for w in category_works if w['Название работы'].strip().lower() == message.text.strip().lower()), None
 
     if selected_work:
         work_id = selected_work['id'] # Получаем ID из БД
@@ -1050,8 +1128,14 @@ async def handle_work_selection(message: types.Message, state: FSMContext):
         )
         await state.set_state(Form.entering_work_quantity)
     else:
-        available = "\n".join([f"• {w['Название работы']} ({w.get('Категория', '')})" for w in works])
-        await message.answer(f"❌ Работа '{message.text}' не найдена.\nДоступные работы:\n{available}")
+        available = "\n".join([f"• {w['Название работы']}" for w in category_works])
+        keyboard = [[KeyboardButton(text=w['Название работы'])] for w in category_works]
+        keyboard.append([KeyboardButton(text='📤 Завершить отчет')])
+        keyboard.append([KeyboardButton(text='↩️ Назад')])
+        await message.answer(
+            f"❌ Работа '{message.text}' не найдена.\nДоступные работы:\n{available}",
+            reply_markup=ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+        )
 
 @dp.message(Form.entering_work_quantity)
 async def handle_work_quantity(message: types.Message, state: FSMContext):
@@ -1060,9 +1144,28 @@ async def handle_work_quantity(message: types.Message, state: FSMContext):
     if message.text == '↩️ Назад':
         data = await state.get_data()
         works = data.get('works', [])
-        keyboard = [[KeyboardButton(text=w['Название работы'])] for w in works]
-        keyboard += [[KeyboardButton(text='📤 Завершить отчет')], [KeyboardButton(text='↩️ Назад')]]
-        await message.answer("Выберите выполненную работу:", reply_markup=ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True))
+        selected_category = data.get('selected_category')
+        category_works = works
+        if selected_category:
+            category_works = [
+                w for w in works
+                if (w.get('Категория') or 'Без категории').lower() == selected_category.lower()
+            ]
+        if selected_category and not category_works:
+            categories = data.get('categories', [])
+            await message.answer(
+                "❌ В выбранном разделе нет активных работ. Выберите другой раздел:",
+                reply_markup=get_category_keyboard(categories)
+            )
+            await state.set_state(Form.selecting_category)
+            return
+        keyboard = [[KeyboardButton(text=w['Название работы'])] for w in category_works]
+        keyboard.append([KeyboardButton(text='📤 Завершить отчет')])
+        keyboard.append([KeyboardButton(text='↩️ Назад')])
+        await message.answer(
+            "Выберите выполненную работу:",
+            reply_markup=ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+        )
         await state.set_state(Form.selecting_work)
         return
 
@@ -1219,10 +1322,26 @@ async def handle_add_more_works(message: types.Message, state: FSMContext):
     if message.text == '✅ Добавить еще работу':
         data = await state.get_data()
         works = data.get('works', [])
-        keyboard = [[KeyboardButton(text=w['Название работы'])] for w in works]
-        keyboard += [[KeyboardButton(text='📤 Завершить отчет')], [KeyboardButton(text='↩️ Назад')]]
-        await message.answer("Выберите выполненную работу:", reply_markup=ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True))
-        await state.set_state(Form.selecting_work)
+        categories = data.get('categories', [])
+        if not works:
+            works = await get_active_works()
+            for work in works:
+                work['Категория'] = work.get('Категория') or 'Без категории'
+            categories = sorted({work['Категория'] for work in works})
+            await state.update_data(works=works, categories=categories)
+        if not categories:
+            await message.answer(
+                "❌ Нет доступных разделов для выбора. Возврат в главное меню.",
+                reply_markup=get_main_keyboard(message.from_user.id)
+            )
+            await state.set_state(Form.selecting_action)
+            return
+        await state.update_data(selected_category=None, selected_work_id=None, selected_work_name=None)
+        await message.answer(
+            "Выберите раздел:",
+            reply_markup=get_category_keyboard(categories)
+        )
+        await state.set_state(Form.selecting_category)
     elif message.text == '📤 Завершить отчет':
         data = await state.get_data()
         works_list = data.get('works_list', [])
