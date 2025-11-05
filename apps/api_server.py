@@ -175,6 +175,45 @@ async def update_work_in_db(work_id: int, work_data: dict):
     except Exception as e:
         logger.error(f"⚠️ Ошибка обновления работы ID {work_id}: {e}")
         return False
+    
+async def add_balance_to_work_in_db(work_id: int, amount: float):
+    """Увеличивает баланс работы на указанную величину."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            try:
+                await db.execute("BEGIN")
+
+                async with db.execute(
+                    "SELECT balance FROM works WHERE id = ?",
+                    (work_id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    if not row:
+                        await db.rollback()
+                        return None
+
+                    current_balance = row[0] if row[0] is not None else 0
+
+                new_balance = current_balance + amount
+
+                await db.execute(
+                    "UPDATE works SET balance = ? WHERE id = ?",
+                    (new_balance, work_id)
+                )
+                await db.commit()
+                logger.info(
+                    f"🏗️ Баланс работы ID: {work_id} увеличен на {amount}. Новый баланс: {new_balance}"
+                )
+                return new_balance
+            except Exception as inner_error:
+                await db.rollback()
+                logger.error(
+                    f"⚠️ Ошибка при увеличении баланса работы ID {work_id}: {inner_error}"
+                )
+                return None
+    except Exception as e:
+        logger.error(f"⚠️ Ошибка соединения при увеличении баланса работы ID {work_id}: {e}")
+        return None 
 
 async def delete_work_from_db(work_id: int):
     """Удаляет работу из базы данных."""
@@ -552,6 +591,45 @@ async def update_material_in_db(material_id: int, material_data: dict):
     except Exception as e:
         logger.error(f"⚠️ Ошибка обновления материала ID {material_id}: {e}")
         return False
+    
+async def add_quantity_to_material_in_db(material_id: int, amount: float):
+    """Увеличивает количество материала на складе"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            try:
+                await db.execute("BEGIN")
+
+                async with db.execute(
+                    "SELECT quantity FROM materials WHERE id = ?",
+                    (material_id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    if not row:
+                        await db.rollback()
+                        return None
+
+                    current_quantity = row[0] if row[0] is not None else 0
+
+                new_quantity = current_quantity + amount
+
+                await db.execute(
+                    "UPDATE materials SET quantity = ? WHERE id = ?",
+                    (new_quantity, material_id)
+                )
+                await db.commit()
+                logger.info(
+                    f"📦 Увеличено количество материала ID: {material_id} на {amount}. Новый остаток: {new_quantity}"
+                )
+                return new_quantity
+            except Exception as inner_error:
+                await db.rollback()
+                logger.error(
+                    f"⚠️ Ошибка при увеличении количества материала ID {material_id}: {inner_error}"
+                )
+                return None
+    except Exception as e:
+        logger.error(f"⚠️ Ошибка соединения при увеличении количества материала ID {material_id}: {e}")
+        return None
 
 async def delete_material_from_db(material_id: int):
     """Удаляет материал"""
@@ -1502,6 +1580,41 @@ async def update_work(work_id: int, request: Request):
         logger.error(f"❌ Ошибка при обновлении работы ID {work_id}: {e}")
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
 
+@app.put("/api/works/{work_id}/add-balance")
+async def add_work_balance(work_id: int, request: Request):
+    existing_work = await get_work_by_id(work_id)
+    if existing_work is None:
+        raise HTTPException(status_code=404, detail="Работа не найдена")
+
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Неверный формат JSON")
+
+    if 'amount' not in payload:
+        raise HTTPException(status_code=400, detail="Отсутствует поле: amount")
+
+    try:
+        amount = float(payload['amount'])
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="amount должно быть числом")
+
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="amount должно быть больше 0")
+
+    new_balance = await add_balance_to_work_in_db(work_id, amount)
+    if new_balance is None:
+        raise HTTPException(status_code=500, detail="Не удалось обновить баланс работы")
+
+    existing_work['На балансе'] = new_balance
+    existing_work['balance'] = new_balance
+
+    return {
+        "success": True,
+        "message": "Баланс работы успешно обновлен",
+        "data": existing_work
+    }
+
 @app.delete("/api/works/{work_id}")
 async def delete_work(work_id: int):
     # Проверяем, существует ли работа
@@ -1638,6 +1751,39 @@ async def create_material(request: Request):
         logger.error(f"❌ Ошибка при создании материала: {e}")
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
 
+@app.put("/api/materials/{material_id}/add-quantity")
+async def add_material_quantity_endpoint(material_id: int, request: Request):
+    material = await get_material_by_id(material_id)
+    if material is None:
+        raise HTTPException(status_code=404, detail="Материал не найден")
+
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Неверный формат JSON")
+
+    if 'amount' not in payload:
+        raise HTTPException(status_code=400, detail="Отсутствует поле: amount")
+
+    try:
+        amount = float(payload['amount'])
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="amount должно быть числом")
+
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="amount должно быть больше 0")
+
+    new_quantity = await add_quantity_to_material_in_db(material_id, amount)
+    if new_quantity is None:
+        raise HTTPException(status_code=500, detail="Не удалось обновить количество материала")
+
+    material['quantity'] = new_quantity
+
+    return {
+        "success": True,
+        "message": "Количество материала успешно обновлено",
+        "data": material
+    }
 
 @app.put("/api/materials/{material_id}")
 async def update_material(material_id: int, request: Request):
