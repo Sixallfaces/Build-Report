@@ -220,28 +220,82 @@ async def get_active_works():
         logger.error(traceback.format_exc())
         return []
 
+async def _fetch_work_materials_requirements(db, work_id: int):
+    """Получает список материалов и норм расхода для указанной работы."""
+    async with db.execute('''
+        SELECT wm.material_id, wm.quantity_per_unit, m.name, m.quantity
+        FROM work_materials wm
+        JOIN materials m ON wm.material_id = m.id
+        WHERE wm.work_id = ?
+    ''', (work_id,)) as cursor:
+        rows = await cursor.fetchall()
+        materials = []
+        for row in rows:
+            material_id, quantity_per_unit, material_name, available_quantity = row
+            materials.append({
+                'material_id': material_id,
+                'quantity_per_unit': quantity_per_unit,
+                'material_name': material_name,
+                'available_quantity': available_quantity
+            })
+        return materials
+
 async def update_work_balance(work_id: int, quantity_used: float):
-    """Обновляет баланс работы в базе данных."""
+    """Обновляет баланс работы и списывает материалы на складе."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            # Получаем текущий баланс
-            async with db.execute(
-                "SELECT balance FROM works WHERE id = ?", (work_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                if not row:
-                    return False, "❌ Работа не найдена!"
-                current_balance = row[0]
+            try:
+                await db.execute("BEGIN")
+
+                # Получаем текущий баланс
+                async with db.execute(
+                    "SELECT balance FROM works WHERE id = ?", (work_id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    if not row:
+                        await db.rollback()
+                        return False, "❌ Работа не найдена!"
+                    current_balance = row[0]
+
                 new_balance = current_balance - quantity_used
                 if new_balance < 0:
+                    await db.rollback()                  
                     return False, "❌ Недостаточно материалов на балансе!"
-                # Обновляем баланс
+                
+                # Проверяем доступность материалов на складе
+                materials_requirements = await _fetch_work_materials_requirements(db, work_id)
+                for requirement in materials_requirements:
+                    total_required = requirement['quantity_per_unit'] * quantity_used
+                    if total_required <= 0:
+                        continue
+                    if requirement['available_quantity'] < total_required:
+                        await db.rollback()
+                        return False, (
+                            f"❌ Недостаточно материала \"{requirement['material_name']}\" на складе!"
+                        )
+
+                # Обновляем баланс работы
+
                 await db.execute(
                     "UPDATE works SET balance = ? WHERE id = ?",
                     (new_balance, work_id)
                 )
+
+                # Списываем материалы со склада
+                for requirement in materials_requirements:
+                    total_required = requirement['quantity_per_unit'] * quantity_used
+                    if total_required <= 0:
+                        continue
+                    await db.execute(
+                        "UPDATE materials SET quantity = quantity - ? WHERE id = ?",
+                        (total_required, requirement['material_id'])
+                    )
+
                 await db.commit()
                 return True, new_balance
+            except Exception as inner_error:
+                await db.rollback()
+                raise inner_error
     except Exception as e:
         logger.error(f"⚠️ Ошибка обновления баланса: {e}")
         logger.error(traceback.format_exc())
