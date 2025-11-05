@@ -180,11 +180,18 @@ async def delete_work_from_db(work_id: int):
     """Удаляет работу из базы данных."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute("DELETE FROM works WHERE id = ?", (work_id,))
-            await db.commit()
-            if db.rowcount > 0:
-                logger.info(f"🗑️ Удалена работа ID: {work_id}")
-                return True
+            try:
+                await db.execute("BEGIN")
+                await db.execute("DELETE FROM work_materials WHERE work_id = ?", (work_id,))
+                await db.execute("DELETE FROM works WHERE id = ?", (work_id,))
+                await db.commit()
+                if db.total_changes > 0:
+                    logger.info(f"🗑️ Удалена работа ID: {work_id}")
+                    return True
+            except Exception as inner_error:
+                await db.rollback()
+                logger.error(f"⚠️ Ошибка при удалении работы ID {work_id}: {inner_error}")
+                return False
         return False
     except Exception as e:
         logger.error(f"⚠️ Ошибка удаления работы ID {work_id}: {e}")
@@ -375,6 +382,22 @@ async def init_materials_table():
         ''')
         await db.commit()
 
+async def init_work_materials_table():
+    """Создает таблицу соответствия работ и материалов"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS work_materials (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                work_id INTEGER NOT NULL,
+                material_id INTEGER NOT NULL,
+                quantity_per_unit REAL NOT NULL DEFAULT 0,
+                UNIQUE(work_id, material_id),
+                FOREIGN KEY (work_id) REFERENCES works(id) ON DELETE CASCADE,
+                FOREIGN KEY (material_id) REFERENCES materials(id) ON DELETE CASCADE
+            )
+        ''')
+        await db.commit()        
+
 async def get_all_materials_from_db():
     """Получает список всех материалов"""
     try:
@@ -423,6 +446,67 @@ async def get_material_by_id(material_id: int):
     except Exception as e:
         logger.error(f"⚠️ Ошибка получения материала ID {material_id}: {e}")
         return None
+
+async def fetch_work_materials_requirements(db, work_id: int):
+    """Получает список материалов и норм расхода для указанной работы, используя существующее соединение"""
+    async with db.execute('''
+        SELECT wm.material_id, wm.quantity_per_unit, m.name, m.unit, m.category, m.quantity
+        FROM work_materials wm
+        JOIN materials m ON wm.material_id = m.id
+        WHERE wm.work_id = ?
+    ''', (work_id,)) as cursor:
+        rows = await cursor.fetchall()
+        materials = []
+        for row in rows:
+            material_id, quantity_per_unit, name, unit, category, available_quantity = row
+            materials.append({
+                'material_id': material_id,
+                'quantity_per_unit': quantity_per_unit,
+                'material_name': name,
+                'unit': unit,
+                'category': category,
+                'available_quantity': available_quantity
+            })
+        return materials
+
+async def get_work_materials_from_db(work_id: int):
+    """Возвращает материалы, закрепленные за работой"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            return await fetch_work_materials_requirements(db, work_id)
+    except Exception as e:
+        logger.error(f"⚠️ Ошибка получения материалов для работы ID {work_id}: {e}")
+        return []
+
+async def replace_work_materials_for_work(work_id: int, materials_data: List[dict]):
+    """Полностью заменяет набор материалов для работы"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            try:
+                await db.execute("BEGIN")
+                await db.execute("DELETE FROM work_materials WHERE work_id = ?", (work_id,))
+
+                for item in materials_data:
+                    await db.execute(
+                        "INSERT INTO work_materials (work_id, material_id, quantity_per_unit) VALUES (?, ?, ?)",
+                        (work_id, item['material_id'], item['quantity_per_unit'])
+                    )
+
+                await db.commit()
+                logger.info(f"🔗 Обновлены материалы для работы ID: {work_id}")
+                return True, None
+            except aiosqlite.IntegrityError as e:
+                await db.rollback()
+                logger.error(f"❌ Ошибка целостности при обновлении материалов работы {work_id}: {e}")
+                return False, "Невозможно сохранить материалы для работы"
+            except Exception as e:
+                await db.rollback()
+                logger.error(f"⚠️ Ошибка обновления материалов для работы {work_id}: {e}")
+                return False, str(e)
+    except Exception as e:
+        logger.error(f"⚠️ Не удалось установить соединение для обновления материалов работы {work_id}: {e}")
+        return False, str(e)
+
 
 async def insert_material_to_db(material_data: dict):
     """Добавляет новый материал"""
@@ -473,11 +557,18 @@ async def delete_material_from_db(material_id: int):
     """Удаляет материал"""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            cursor = await db.execute("DELETE FROM materials WHERE id = ?", (material_id,))
-            await db.commit()
-            if cursor.rowcount and cursor.rowcount > 0:
-                logger.info(f"🗑️ Удален материал ID: {material_id}")
-                return True
+            try:
+                await db.execute("BEGIN")
+                await db.execute("DELETE FROM work_materials WHERE material_id = ?", (material_id,))
+                cursor = await db.execute("DELETE FROM materials WHERE id = ?", (material_id,))
+                await db.commit()
+                if cursor.rowcount and cursor.rowcount > 0:
+                    logger.info(f"🗑️ Удален материал ID: {material_id}")
+                    return True
+            except Exception as inner_error:
+                await db.rollback()
+                logger.error(f"⚠️ Ошибка при удалении материала ID {material_id}: {inner_error}")
+                return False
         return False
     except Exception as e:
         logger.error(f"⚠️ Ошибка удаления материала ID {material_id}: {e}")
@@ -694,29 +785,46 @@ async def delete_report_from_db(report_id: int):
     """Удаляет отчет из базы данных и восстанавливает баланс."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            # Получаем данные отчета для восстановления баланса
-            async with db.execute(
-                "SELECT work_id, quantity FROM work_reports WHERE id = ?", 
-                (report_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                if not row:
-                    return False, "Отчет не найден"
-                
-                work_id, quantity = row
-            
-            # Восстанавливаем баланс
-            await db.execute(
-                "UPDATE works SET balance = balance + ? WHERE id = ?",
-                (quantity, work_id)
-            )
-            
-            # Удаляем отчет
-            await db.execute("DELETE FROM work_reports WHERE id = ?", (report_id,))
-            await db.commit()
-            
-            logger.info(f"🗑️ Удален отчет ID: {report_id}")
-            return True, "Отчет успешно удален"
+            try:
+                await db.execute("BEGIN")
+
+                # Получаем данные отчета для восстановления баланса
+                async with db.execute(
+                    "SELECT work_id, quantity FROM work_reports WHERE id = ?",
+                    (report_id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    if not row:
+                        return False, "Отчет не найден"
+
+                    work_id, quantity = row
+
+                # Восстанавливаем баланс работы
+                await db.execute(
+                    "UPDATE works SET balance = balance + ? WHERE id = ?",
+                    (quantity, work_id)
+                )
+
+                # Возвращаем материалы на склад
+                requirements = await fetch_work_materials_requirements(db, work_id)
+                for requirement in requirements:
+                    total_to_restore = requirement['quantity_per_unit'] * quantity
+                    if total_to_restore <= 0:
+                        continue
+                    await db.execute(
+                        "UPDATE materials SET quantity = quantity + ? WHERE id = ?",
+                        (total_to_restore, requirement['material_id'])
+                    )
+
+                # Удаляем отчет
+                await db.execute("DELETE FROM work_reports WHERE id = ?", (report_id,))
+                await db.commit()
+
+                logger.info(f"🗑️ Удален отчет ID: {report_id}")
+                return True, "Отчет успешно удален"
+            except Exception as e:
+                await db.rollback()
+                raise e
     except Exception as e:
         await db.rollback()
         logger.error(f"❌ Ошибка удаления отчета ID {report_id}: {e}")
@@ -754,40 +862,69 @@ async def create_work_report_in_db(report_data: dict):
     """Создает новый отчет о работе."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            # Проверяем баланс
-            async with db.execute(
-                "SELECT balance FROM works WHERE id = ?", 
-                (report_data['work_id'],)
-            ) as cursor:
-                balance_row = await cursor.fetchone()
-                if not balance_row:
-                    return False, "Работа не найдена"
-                
-                balance = balance_row[0]
-                if balance < report_data['quantity']:
-                    return False, "Недостаточно материалов на балансе"
-            
-            # Вычитаем из баланса
-            await db.execute(
-                "UPDATE works SET balance = balance - ? WHERE id = ?",
-                (report_data['quantity'], report_data['work_id'])
-            )
-            
-            # Создаем отчет
-            await db.execute(
-                '''INSERT INTO work_reports 
-                   (foreman_id, work_id, quantity, report_date, report_time, photo_report_url) 
-                   VALUES (?, ?, ?, ?, ?, ?)''',
-                (report_data['foreman_id'], report_data['work_id'], report_data['quantity'],
-                 report_data['report_date'], report_data['report_time'],
-                 report_data.get('photo_report_url', ''))
-            )
-            await db.commit()
-            report_id = db.last_insert_rowid()
-            logger.info(f"📊 Создан отчет ID: {report_id}")
-            return True, report_id
+            try:
+                await db.execute("BEGIN")
+
+                # Проверяем баланс работы
+                async with db.execute(
+                    "SELECT balance FROM works WHERE id = ?",
+                    (report_data['work_id'],)
+                ) as cursor:
+                    balance_row = await cursor.fetchone()
+                    if not balance_row:
+                        await db.rollback()
+                        return False, "Работа не найдена"
+
+                    balance = balance_row[0]
+                    if balance < report_data['quantity']:
+                        await db.rollback()
+                        return False, "Недостаточно материалов на балансе"
+
+                # Проверяем наличие материалов на складе
+                materials_requirements = await fetch_work_materials_requirements(db, report_data['work_id'])
+                for requirement in materials_requirements:
+                    total_required = requirement['quantity_per_unit'] * report_data['quantity']
+                    if total_required <= 0:
+                        continue
+                    if requirement['available_quantity'] < total_required:
+                        await db.rollback()
+                        return False, (
+                            f"Недостаточно материала \"{requirement['material_name']}\" на складе"
+                        )
+
+                # Вычитаем из баланса работы
+                await db.execute(
+                    "UPDATE works SET balance = balance - ? WHERE id = ?",
+                    (report_data['quantity'], report_data['work_id'])
+                )
+
+                # Вычитаем материалы со склада
+                for requirement in materials_requirements:
+                    total_required = requirement['quantity_per_unit'] * report_data['quantity']
+                    if total_required <= 0:
+                        continue
+                    await db.execute(
+                        "UPDATE materials SET quantity = quantity - ? WHERE id = ?",
+                        (total_required, requirement['material_id'])
+                    )
+
+                # Создаем отчет
+                await db.execute(
+                    '''INSERT INTO work_reports
+                       (foreman_id, work_id, quantity, report_date, report_time, photo_report_url)
+                       VALUES (?, ?, ?, ?, ?, ?)''',
+                    (report_data['foreman_id'], report_data['work_id'], report_data['quantity'],
+                     report_data['report_date'], report_data['report_time'],
+                     report_data.get('photo_report_url', ''))
+                )
+                await db.commit()
+                report_id = db.last_insert_rowid()
+                logger.info(f"📊 Создан отчет ID: {report_id}")
+                return True, report_id
+            except Exception as e:
+                await db.rollback()
+                raise e
     except Exception as e:
-        await db.rollback()
         logger.error(f"❌ Ошибка создания отчета: {e}")
         return False, f"Ошибка создания: {str(e)}"
 
@@ -795,59 +932,99 @@ async def update_work_report_in_db(report_id: int, report_data: dict):
     """Обновляет отчет о работе."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            # Получаем старые данные
-            async with db.execute(
-                "SELECT work_id, quantity FROM work_reports WHERE id = ?", 
-                (report_id,)
-            ) as cursor:
-                old_row = await cursor.fetchone()
-                if not old_row:
-                    return False, "Отчет не найден"
-                
-                old_work_id, old_quantity = old_row
-            
-            # Восстанавливаем старый баланс
-            await db.execute(
-                "UPDATE works SET balance = balance + ? WHERE id = ?",
-                (old_quantity, old_work_id)
-            )
-            
-            # Проверяем новый баланс
-            async with db.execute(
-                "SELECT balance FROM works WHERE id = ?", 
-                (report_data['work_id'],)
-            ) as cursor:
-                new_balance_row = await cursor.fetchone()
-                if not new_balance_row:
-                    await db.rollback()
-                    return False, "Новая работа не найдена"
-                
-                new_balance = new_balance_row[0]
-                if new_balance < report_data['quantity']:
-                    await db.rollback()
-                    return False, "Недостаточно материалов на балансе для новой работы"
-            
-            # Вычитаем новое количество
-            await db.execute(
-                "UPDATE works SET balance = balance - ? WHERE id = ?",
-                (report_data['quantity'], report_data['work_id'])
-            )
-            
-            # Обновляем отчет
-            await db.execute(
-                '''UPDATE work_reports 
-                   SET foreman_id = ?, work_id = ?, quantity = ?, 
-                       report_date = ?, report_time = ?, photo_report_url = ? 
-                   WHERE id = ?''',
-                (report_data['foreman_id'], report_data['work_id'], report_data['quantity'],
-                 report_data['report_date'], report_data['report_time'],
-                 report_data.get('photo_report_url', ''), report_id)
-            )
-            await db.commit()
-            logger.info(f"📊 Обновлен отчет ID: {report_id}")
-            return True, "Отчет успешно обновлен"
+            try:
+                await db.execute("BEGIN")
+
+                # Получаем старые данные
+                async with db.execute(
+                    "SELECT work_id, quantity FROM work_reports WHERE id = ?",
+                    (report_id,)
+                ) as cursor:
+                    old_row = await cursor.fetchone()
+                    if not old_row:
+                        await db.rollback()
+                        return False, "Отчет не найден"
+
+                    old_work_id, old_quantity = old_row
+
+                # Восстанавливаем старый баланс работы
+                await db.execute(
+                    "UPDATE works SET balance = balance + ? WHERE id = ?",
+                    (old_quantity, old_work_id)
+                )
+
+                # Восстанавливаем материалы на складе
+                old_requirements = await fetch_work_materials_requirements(db, old_work_id)
+                for requirement in old_requirements:
+                    total_to_restore = requirement['quantity_per_unit'] * old_quantity
+                    if total_to_restore <= 0:
+                        continue
+                    await db.execute(
+                        "UPDATE materials SET quantity = quantity + ? WHERE id = ?",
+                        (total_to_restore, requirement['material_id'])
+                    )
+
+                # Проверяем новый баланс работы
+                async with db.execute(
+                    "SELECT balance FROM works WHERE id = ?",
+                    (report_data['work_id'],)
+                ) as cursor:
+                    new_balance_row = await cursor.fetchone()
+                    if not new_balance_row:
+                        await db.rollback()
+                        return False, "Новая работа не найдена"
+
+                    new_balance = new_balance_row[0]
+                    if new_balance < report_data['quantity']:
+                        await db.rollback()
+                        return False, "Недостаточно материалов на балансе для новой работы"
+
+                # Проверяем наличие материалов на складе для новой работы
+                new_requirements = await fetch_work_materials_requirements(db, report_data['work_id'])
+                for requirement in new_requirements:
+                    total_required = requirement['quantity_per_unit'] * report_data['quantity']
+                    if total_required <= 0:
+                        continue
+                    if requirement['available_quantity'] < total_required:
+                        await db.rollback()
+                        return False, (
+                            f"Недостаточно материала \"{requirement['material_name']}\" на складе"
+                        )
+
+                # Вычитаем новое количество из баланса работы
+                await db.execute(
+                    "UPDATE works SET balance = balance - ? WHERE id = ?",
+                    (report_data['quantity'], report_data['work_id'])
+                )
+
+                # Вычитаем материалы со склада
+                for requirement in new_requirements:
+                    total_required = requirement['quantity_per_unit'] * report_data['quantity']
+                    if total_required <= 0:
+                        continue
+                    await db.execute(
+                        "UPDATE materials SET quantity = quantity - ? WHERE id = ?",
+                        (total_required, requirement['material_id'])
+                    )
+
+                # Обновляем отчет
+                await db.execute(
+                    '''UPDATE work_reports
+                       SET foreman_id = ?, work_id = ?, quantity = ?,
+                           report_date = ?, report_time = ?, photo_report_url = ?
+                       WHERE id = ?''',
+                    (report_data['foreman_id'], report_data['work_id'], report_data['quantity'],
+                     report_data['report_date'], report_data['report_time'],
+                     report_data.get('photo_report_url', ''), report_id)
+                )
+
+                await db.commit()
+                logger.info(f"📊 Обновлен отчет ID: {report_id}")
+                return True, "Отчет успешно обновлен"
+            except Exception as e:
+                await db.rollback()
+                raise e
     except Exception as e:
-        await db.rollback()
         logger.error(f"❌ Ошибка обновления отчета ID {report_id}: {e}")
         return False, f"Ошибка обновления: {str(e)}"
 
@@ -879,6 +1056,7 @@ async def startup_event():
     await init_site_users_table()
     await init_categories_table()
     await init_materials_table()
+    await init_work_materials_table()
 
 
 @app.get("/api/works/export")
@@ -1231,6 +1409,7 @@ async def startup_event():
     await init_site_users_table()
     await init_categories_table()
     await init_materials_table()
+    await init_work_materials_table()
 
 
 # Эндпоинты для работ
@@ -1335,6 +1514,87 @@ async def delete_work(work_id: int):
         return {"success": True, "message": "Работа успешно удалена"}
     else:
         raise HTTPException(status_code=500, detail="Ошибка при удалении работы из БД")
+
+
+@app.get("/api/works/{work_id}/materials")
+async def get_work_materials(work_id: int):
+    work = await get_work_by_id(work_id)
+    if work is None:
+        raise HTTPException(status_code=404, detail="Работа не найдена")
+
+    materials_for_work = await get_work_materials_from_db(work_id)
+    return {"success": True, "data": materials_for_work}
+
+@app.put("/api/works/{work_id}/materials")
+async def update_work_materials(work_id: int, request: Request):
+    work = await get_work_by_id(work_id)
+    if work is None:
+        raise HTTPException(status_code=404, detail="Работа не найдена")
+
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Неверный формат JSON")
+
+    if isinstance(payload, dict) and 'materials' in payload:
+        materials_list = payload['materials']
+    elif isinstance(payload, list):
+        materials_list = payload
+    elif payload is None:
+        materials_list = []
+    else:
+        raise HTTPException(status_code=400, detail="Некорректный формат данных")
+
+    normalized_materials = []
+    seen_ids = set()
+
+    for item in materials_list:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="Элемент материалов должен быть объектом")
+        if 'material_id' not in item or 'quantity_per_unit' not in item:
+            raise HTTPException(status_code=400, detail="Отсутствуют обязательные поля")
+
+        try:
+            material_id = int(item['material_id'])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="material_id должен быть целым числом")
+
+        try:
+            quantity_per_unit = float(item['quantity_per_unit'])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="quantity_per_unit должен быть числом")
+
+        if material_id <= 0:
+            raise HTTPException(status_code=400, detail="material_id должен быть положительным")
+        if quantity_per_unit < 0:
+            raise HTTPException(status_code=400, detail="Количество не может быть отрицательным")
+        if material_id in seen_ids:
+            raise HTTPException(status_code=400, detail="Материал не может повторяться")
+
+        material = await get_material_by_id(material_id)
+        if material is None:
+            raise HTTPException(status_code=404, detail=f"Материал ID {material_id} не найден")
+
+        seen_ids.add(material_id)
+
+        if quantity_per_unit == 0:
+            continue
+
+        normalized_materials.append({
+            'material_id': material_id,
+            'quantity_per_unit': quantity_per_unit
+        })
+
+    success, error_message = await replace_work_materials_for_work(work_id, normalized_materials)
+    if not success:
+        raise HTTPException(status_code=400, detail=error_message or "Не удалось сохранить материалы")
+
+    updated_materials = await get_work_materials_from_db(work_id)
+    return {
+        "success": True,
+        "message": "Материалы для работы обновлены",
+        "data": updated_materials
+    }
 
 # Эндпоинты для материалов склада
 @app.get("/api/materials")

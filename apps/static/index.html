@@ -563,6 +563,60 @@
             justify-content: flex-end;
             margin-top: 20px;
         }
+
+        .modal-subtitle {
+            margin: 0 0 15px 0;
+            color: var(--light);
+            opacity: 0.8;
+            font-size: 0.95rem;
+        }
+
+        .work-materials-modal .modal-content {
+            max-width: 720px;
+        }
+
+        .material-add-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .material-add-row select,
+        .material-add-row input {
+            flex: 1;
+        }
+
+        .material-add-row button {
+            flex-shrink: 0;
+        }
+
+        .work-materials-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        .work-materials-table th,
+        .work-materials-table td {
+            border: 1px solid rgba(84, 176, 165, 0.4);
+            padding: 8px;
+            text-align: left;
+        }
+
+        .work-materials-table th {
+            background: rgba(84, 176, 165, 0.15);
+            color: var(--accent);
+        }
+
+        .work-materials-table tbody tr:nth-child(even) {
+            background: rgba(84, 176, 165, 0.05);
+        }
+
+        .work-materials-table input {
+            width: 100%;
+            box-sizing: border-box;
+        }
         
         /* Стили для списка категорий в модальном окне */
         .categories-list {
@@ -776,12 +830,48 @@
             <h3 class="modal-title">Добавить к балансу</h3>
             <p>Работа: <span id="balanceWorkName"></span></p>
             <p>Текущий баланс: <span id="currentBalance"></span></p>
-            
+
             <input type="number" id="addBalanceAmount" class="login-input" placeholder="Количество" step="1" min="1">
-            
+
             <div class="modal-actions">
                 <button onclick="confirmAddBalance()" class="success">➕ Добавить</button>
                 <button onclick="closeAddBalanceModal()" class="secondary">Отмена</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="workMaterialsModal" class="modal work-materials-modal">
+        <div class="modal-content">
+            <h3 class="modal-title">Материалы работы</h3>
+            <p class="modal-subtitle">Работа: <span id="workMaterialsWorkName"></span></p>
+
+            <div class="material-add-row">
+                <select id="workMaterialSelect" class="login-input">
+                    <option value="">Выберите материал</option>
+                </select>
+                <input type="number" id="workMaterialQuantity" class="login-input" placeholder="Расход на 1 ед." min="0" step="0.01">
+                <button id="workMaterialAddButton" class="success" type="button">➕ Добавить</button>
+            </div>
+
+            <table class="work-materials-table">
+                <thead>
+                    <tr>
+                        <th>Материал</th>
+                        <th>Ед. изм.</th>
+                        <th>Категория</th>
+                        <th>На складе</th>
+                        <th>Расход на 1 ед.</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody id="workMaterialsTableBody">
+                    <tr><td colspan="6" style="text-align: center;">Материалы не назначены</td></tr>
+                </tbody>
+            </table>
+
+            <div class="modal-actions">
+                <button onclick="saveWorkMaterials()" class="success">💾 Сохранить</button>
+                <button onclick="closeWorkMaterialsModal()" class="secondary">Закрыть</button>
             </div>
         </div>
     </div>
@@ -1087,6 +1177,8 @@
     let reports = [];
     let allReports = [];
     let categories = [];
+    let currentWorkIdForMaterials = null;
+    let currentWorkMaterials = [];
 
     // Переменные для сортировки
     let currentSortColumn = -1;
@@ -1290,6 +1382,7 @@
     function initializeApp() {
         initializeTabs();
         initializeWorksTab();
+        initializeWorkMaterialsModal();
         initializeMaterialsTab();
         initializeForemenTab();
         initializeReportsTab();
@@ -1340,6 +1433,25 @@
         document.getElementById('exportWorks').addEventListener('click', exportWorksToExcel);
         document.getElementById('importWorks').addEventListener('click', triggerImportWorks);
         document.getElementById('importFileInput').addEventListener('change', handleWorksImport);
+    }
+
+    function initializeWorkMaterialsModal() {
+        const addButton = document.getElementById('workMaterialAddButton');
+        if (addButton) {
+            addButton.addEventListener('click', event => {
+                event.preventDefault();
+                addMaterialToWorkList();
+            });
+        }
+
+        const modal = document.getElementById('workMaterialsModal');
+        if (modal) {
+            modal.addEventListener('click', event => {
+                if (event.target === modal) {
+                    closeWorkMaterialsModal();
+                }
+            });
+        }
     }
 
     function initializeMaterialsTab() {
@@ -1449,15 +1561,262 @@
                 </td>
                 <td class="action-buttons">
                     <button onclick="saveWork(${work.id})" class="secondary">💾</button>
+                    <button onclick="openWorkMaterials(${work.id})" class="secondary" title="Материалы работы">🧾</button>
                     <button onclick="addBalance(${work.id})" class="success" title="Добавить к балансу">➕</button>
                     <button onclick="deleteWork(${work.id})" class="danger">🗑️</button>
                 </td>
             `;
             tableBody.appendChild(row);
         });
-        
+
         initializeWorkCheckboxes();
         addSortingToWorksTable();
+    }
+
+    function populateWorkMaterialSelect() {
+        const select = document.getElementById('workMaterialSelect');
+        if (!select) return;
+
+        const selectedIds = new Set(currentWorkMaterials.map(item => item.material_id));
+        const hasMaterials = Array.isArray(materials) && materials.length > 0;
+        let options = '<option value="">Выберите материал</option>';
+
+        if (hasMaterials) {
+            materials.forEach(material => {
+                const labelParts = [];
+                labelParts.push(material.name || `ID ${material.id}`);
+                if (material.unit) {
+                    labelParts.push(material.unit);
+                }
+                if (material.category) {
+                    labelParts.push(material.category);
+                }
+                const label = labelParts.join(' • ');
+                const disabled = selectedIds.has(material.id) ? 'disabled' : '';
+                options += `<option value="${material.id}" ${disabled}>${label}</option>`;
+            });
+        } else {
+            options = '<option value="">Нет доступных материалов</option>';
+        }
+
+        select.innerHTML = options;
+        select.disabled = !hasMaterials;
+    }
+
+    function displayWorkMaterialsList() {
+        const tbody = document.getElementById('workMaterialsTableBody');
+        if (!tbody) return;
+
+        if (!currentWorkMaterials || currentWorkMaterials.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Материалы не назначены</td></tr>';
+            return;
+        }
+
+        const rowsHtml = currentWorkMaterials.map(item => {
+            const availableNumber = Number(item.available_quantity);
+            const formattedAvailable = Number.isFinite(availableNumber)
+                ? availableNumber.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+                : '0';
+            const quantityNumber = Number(item.quantity_per_unit);
+            const quantityValue = Number.isFinite(quantityNumber) ? quantityNumber : 0;
+
+            return `
+                <tr data-material-id="${item.material_id}">
+                    <td>${item.material_name || `ID ${item.material_id}`}</td>
+                    <td>${item.unit || ''}</td>
+                    <td>${item.category || ''}</td>
+                    <td>${formattedAvailable}</td>
+                    <td><input type="number" min="0" step="0.01" value="${quantityValue}" oninput="handleWorkMaterialQuantityChange(${item.material_id}, this.value)"></td>
+                    <td class="action-buttons">
+                        <button type="button" class="danger" onclick="removeMaterialFromWork(${item.material_id})">🗑️</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        tbody.innerHTML = rowsHtml;
+    }
+
+    async function loadWorkMaterials(workId) {
+        try {
+            const response = await makeApiRequest(`/api/works/${workId}/materials`);
+            if (response && response.success) {
+                currentWorkMaterials = (response.data || []).map(item => ({
+                    material_id: item.material_id,
+                    material_name: item.material_name || `ID ${item.material_id}`,
+                    unit: item.unit,
+                    category: item.category,
+                    quantity_per_unit: parseFloat(item.quantity_per_unit) || 0,
+                    available_quantity: item.available_quantity !== undefined ? Number(item.available_quantity) : 0
+                }));
+            } else {
+                currentWorkMaterials = [];
+                const errorMessage = response?.error || response?.detail;
+                if (errorMessage) {
+                    showNotification('Ошибка загрузки материалов работы: ' + errorMessage, 'error');
+                }
+            }
+        } catch (error) {
+            currentWorkMaterials = [];
+            showNotification('Ошибка загрузки материалов работы: ' + error.message, 'error');
+        }
+
+        populateWorkMaterialSelect();
+        displayWorkMaterialsList();
+    }
+
+    async function openWorkMaterials(workId) {
+        const modal = document.getElementById('workMaterialsModal');
+        if (!modal) return;
+
+        const work = works.find(item => item.id === workId);
+        if (!work) {
+            showNotification('Работа не найдена', 'error');
+            return;
+        }
+
+        currentWorkIdForMaterials = workId;
+
+        const workNameElement = document.getElementById('workMaterialsWorkName');
+        if (workNameElement) {
+            const unitSuffix = work['Единица измерения'] ? ` (${work['Единица измерения']})` : '';
+            workNameElement.textContent = `${work['Название работы']}${unitSuffix}`;
+        }
+
+        const select = document.getElementById('workMaterialSelect');
+        const quantityInput = document.getElementById('workMaterialQuantity');
+        if (select) select.value = '';
+        if (quantityInput) quantityInput.value = '';
+
+        const tbody = document.getElementById('workMaterialsTableBody');
+        if (tbody) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Загрузка...</td></tr>';
+        }
+
+        modal.style.display = 'flex';
+
+        if (!materials || materials.length === 0) {
+            await loadMaterials();
+        }
+
+        await loadWorkMaterials(workId);
+    }
+
+    function addMaterialToWorkList() {
+        const select = document.getElementById('workMaterialSelect');
+        const quantityInput = document.getElementById('workMaterialQuantity');
+        if (!select || !quantityInput) return;
+
+        const materialId = parseInt(select.value, 10);
+        const quantity = parseFloat(quantityInput.value);
+
+        if (!materialId) {
+            showNotification('Выберите материал для добавления', 'error');
+            return;
+        }
+
+        if (isNaN(quantity) || quantity <= 0) {
+            showNotification('Введите расход материала больше 0', 'error');
+            return;
+        }
+
+        const material = materials.find(item => item.id === materialId);
+        if (!material) {
+            showNotification('Материал не найден', 'error');
+            return;
+        }
+
+        const normalizedQuantity = Number(quantity);
+        const existing = currentWorkMaterials.find(item => item.material_id === materialId);
+
+        if (existing) {
+            existing.quantity_per_unit = normalizedQuantity;
+            existing.material_name = material.name || existing.material_name;
+            existing.unit = material.unit;
+            existing.category = material.category;
+            existing.available_quantity = material.quantity !== undefined ? Number(material.quantity) : existing.available_quantity;
+        } else {
+            currentWorkMaterials.push({
+                material_id: materialId,
+                material_name: material.name || `ID ${materialId}`,
+                unit: material.unit,
+                category: material.category,
+                quantity_per_unit: normalizedQuantity,
+                available_quantity: material.quantity !== undefined ? Number(material.quantity) : 0
+            });
+        }
+
+        quantityInput.value = '';
+        select.value = '';
+
+        populateWorkMaterialSelect();
+        displayWorkMaterialsList();
+    }
+
+    function handleWorkMaterialQuantityChange(materialId, value) {
+        const target = currentWorkMaterials.find(item => item.material_id === materialId);
+        if (!target) return;
+
+        let parsed = parseFloat(value);
+        if (isNaN(parsed) || parsed < 0) {
+            parsed = 0;
+        }
+        target.quantity_per_unit = parsed;
+    }
+
+    function removeMaterialFromWork(materialId) {
+        currentWorkMaterials = currentWorkMaterials.filter(item => item.material_id !== materialId);
+        populateWorkMaterialSelect();
+        displayWorkMaterialsList();
+    }
+
+    async function saveWorkMaterials() {
+        if (!currentWorkIdForMaterials) {
+            showNotification('Не выбрана работа для сохранения материалов', 'error');
+            return;
+        }
+
+        const payload = currentWorkMaterials.map(item => ({
+            material_id: item.material_id,
+            quantity_per_unit: Number(item.quantity_per_unit) || 0
+        }));
+
+        try {
+            const response = await makeApiRequest(`/api/works/${currentWorkIdForMaterials}/materials`, {
+                method: 'PUT',
+                body: JSON.stringify({ materials: payload })
+            });
+
+            if (response && response.success) {
+                currentWorkMaterials = (response.data || []).map(item => ({
+                    material_id: item.material_id,
+                    material_name: item.material_name || `ID ${item.material_id}`,
+                    unit: item.unit,
+                    category: item.category,
+                    quantity_per_unit: parseFloat(item.quantity_per_unit) || 0,
+                    available_quantity: item.available_quantity !== undefined ? Number(item.available_quantity) : 0
+                }));
+                displayWorkMaterialsList();
+                populateWorkMaterialSelect();
+                showNotification('Материалы работы обновлены', 'success');
+            } else {
+                const errorMessage = response?.error || response?.message || 'Не удалось сохранить материалы';
+                showNotification(errorMessage, 'error');
+            }
+        } catch (error) {
+            showNotification('Ошибка сохранения материалов: ' + error.message, 'error');
+        }
+    }
+
+    function closeWorkMaterialsModal() {
+        const modal = document.getElementById('workMaterialsModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+        currentWorkIdForMaterials = null;
+        currentWorkMaterials = [];
+        populateWorkMaterialSelect();
+        displayWorkMaterialsList();
     }
 
     // ФУНКЦИИ СОРТИРОВКИ
@@ -2135,6 +2494,23 @@
             if (data.success) {
                 materials = data.data || [];
                 displayMaterials(materials);
+                if (currentWorkMaterials && currentWorkMaterials.length > 0) {
+                    currentWorkMaterials = currentWorkMaterials.map(item => {
+                        const updated = materials.find(material => material.id === item.material_id);
+                        if (updated) {
+                            return {
+                                ...item,
+                                material_name: updated.name || item.material_name,
+                                unit: updated.unit,
+                                category: updated.category,
+                                available_quantity: updated.quantity !== undefined ? Number(updated.quantity) : item.available_quantity
+                            };
+                        }
+                        return item;
+                    });
+                    displayWorkMaterialsList();
+                }
+                populateWorkMaterialSelect();
             } else {
                 showNotification('Ошибка при загрузке материалов: ' + (data.error || 'Неизвестная ошибка'), 'error');
             }
