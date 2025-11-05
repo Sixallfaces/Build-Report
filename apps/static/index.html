@@ -840,6 +840,21 @@
         </div>
     </div>
 
+    <div id="addMaterialQuantityModal" class="modal">
+        <div class="modal-content">
+            <h3 class="modal-title">Добавить на склад</h3>
+            <p>Материал: <span id="materialQuantityName"></span></p>
+            <p>Текущее количество: <span id="materialCurrentQuantity"></span></p>
+
+            <input type="number" id="addMaterialQuantityAmount" class="login-input" placeholder="Количество" step="0.01" min="0.01">
+
+            <div class="modal-actions">
+                <button onclick="confirmAddMaterialQuantity()" class="success">➕ Добавить</button>
+                <button onclick="closeAddMaterialQuantityModal()" class="secondary">Отмена</button>
+            </div>
+        </div>
+    </div>
+
     <div id="workMaterialsModal" class="modal work-materials-modal">
         <div class="modal-content">
             <h3 class="modal-title">Материалы работы</h3>
@@ -1179,6 +1194,9 @@
     let categories = [];
     let currentWorkIdForMaterials = null;
     let currentWorkMaterials = [];
+    let currentMaterialIdForQuantity = null;
+    let currentMaterialQuantity = 0;
+    let currentMaterialUnit = '';
 
     // Переменные для сортировки
     let currentSortColumn = -1;
@@ -2573,6 +2591,7 @@
                 <td><input type="number" value="${quantityValue}" class="editable" data-field="quantity" step="0.01" min="0"></td>
                 <td class="action-buttons">
                     <button onclick="saveMaterial(${material.id})" class="secondary">💾</button>
+                    <button onclick="addMaterialQuantity(${material.id})" class="success" title="Добавить на склад">➕</button>
                     <button onclick="deleteMaterial(${material.id})" class="danger">🗑️</button>
                 </td>
             `;
@@ -3030,7 +3049,7 @@
 
     async function confirmAddBalance() {
         const amount = parseFloat(document.getElementById('addBalanceAmount').value);
-        
+
         if (!amount || amount <= 0) {
             showNotification('Введите положительное число', 'error');
             return;
@@ -3081,6 +3100,122 @@
         } catch (error) {
             console.error('Add balance error:', error);
             showNotification('Ошибка при обновлении баланса: ' + error.message, 'error');
+        }
+    }
+
+    function addMaterialQuantity(materialId) {
+        const material = materials.find(item => item.id === materialId);
+        if (!material) {
+            showNotification('Материал не найден', 'error');
+            return;
+        }
+
+        currentMaterialIdForQuantity = materialId;
+        currentMaterialQuantity = material.quantity !== undefined && material.quantity !== null
+            ? Number(material.quantity)
+            : 0;
+        currentMaterialUnit = material.unit || '';
+
+        const nameElement = document.getElementById('materialQuantityName');
+        if (nameElement) {
+            nameElement.textContent = material.name || `ID ${materialId}`;
+        }
+
+        const currentQuantityElement = document.getElementById('materialCurrentQuantity');
+        if (currentQuantityElement) {
+            const formattedQuantity = Number.isFinite(currentMaterialQuantity)
+                ? currentMaterialQuantity.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+                : '0';
+            currentQuantityElement.textContent = currentMaterialUnit
+                ? `${formattedQuantity} ${currentMaterialUnit}`
+                : formattedQuantity;
+        }
+
+        const amountInput = document.getElementById('addMaterialQuantityAmount');
+        if (amountInput) {
+            amountInput.value = '';
+            amountInput.focus();
+        }
+
+        const modal = document.getElementById('addMaterialQuantityModal');
+        if (modal) {
+            modal.style.display = 'flex';
+        }
+    }
+
+    function closeAddMaterialQuantityModal() {
+        const modal = document.getElementById('addMaterialQuantityModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+
+        currentMaterialIdForQuantity = null;
+        currentMaterialQuantity = 0;
+        currentMaterialUnit = '';
+    }
+
+    async function confirmAddMaterialQuantity() {
+        const amountInput = document.getElementById('addMaterialQuantityAmount');
+        if (!amountInput) {
+            showNotification('Поле количества не найдено', 'error');
+            return;
+        }
+
+        const amount = parseFloat(amountInput.value);
+
+        if (!amount || amount <= 0) {
+            showNotification('Введите положительное число', 'error');
+            return;
+        }
+
+        if (!currentMaterialIdForQuantity) {
+            showNotification('Материал не выбран', 'error');
+            return;
+        }
+
+        const materialId = currentMaterialIdForQuantity;
+        const previousQuantity = currentMaterialQuantity;
+
+        try {
+            showNotification('Добавление на склад...', 'success');
+
+            const response = await fetch(buildApiUrl(`${API_CONFIG.ENDPOINTS.MATERIALS}/${materialId}/add-quantity`), {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                },
+                body: JSON.stringify({ amount })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || `HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            if (data.success) {
+                const newQuantity = previousQuantity + amount;
+                showNotification('Количество материала обновлено', 'success');
+                closeAddMaterialQuantityModal();
+
+                const quantityInput = document.querySelector(`#materialsTableBody tr[data-material-id="${materialId}"] input[data-field="quantity"]`);
+                if (quantityInput) {
+                    quantityInput.value = newQuantity;
+                }
+
+                const materialIndex = materials.findIndex(item => item.id === materialId);
+                if (materialIndex !== -1) {
+                    materials[materialIndex].quantity = newQuantity;
+                }
+            } else {
+                const errorMessage = data.error || data.detail || 'Не удалось обновить количество';
+                showNotification('Ошибка при обновлении количества: ' + errorMessage, 'error');
+            }
+        } catch (error) {
+            console.error('Add material quantity error:', error);
+            showNotification('Ошибка при обновлении количества: ' + error.message, 'error');
         }
     }
 
@@ -3472,6 +3607,15 @@
             addBalanceInput.addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') {
                     confirmAddBalance();
+                }
+            });
+        }
+
+        const addMaterialQuantityInput = document.getElementById('addMaterialQuantityAmount');
+        if (addMaterialQuantityInput) {
+            addMaterialQuantityInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    confirmAddMaterialQuantity();
                 }
             });
         }
