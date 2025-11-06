@@ -49,6 +49,7 @@ class Form(StatesGroup):
     waiting_full_name = State()
     waiting_position = State()
     selecting_action = State()
+    selecting_category = State()
     selecting_work = State()
     entering_work_quantity = State()
     waiting_photo = State()
@@ -742,6 +743,20 @@ def get_main_keyboard(user_id: int):
         keyboard.insert(0, [KeyboardButton(text='📥 Выгрузить отчет')])
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
+def build_category_map(works):
+    category_map = {}
+    for work in works:
+        raw_category = (work.get('Категория') or '').strip()
+        display_category = raw_category if raw_category else 'Без раздела'
+        category_map.setdefault(display_category, []).append(work)
+    return category_map
+
+
+def get_category_keyboard(category_map):
+    keyboard = [[KeyboardButton(text=category)] for category in sorted(category_map.keys())]
+    keyboard.append([KeyboardButton(text='↩️ Назад')])
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
 def get_photo_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -904,18 +919,22 @@ async def handle_main_menu(message: types.Message, state: FSMContext):
         else:
             await message.answer("❌ У вас нет доступа к этой функции.")
     elif text == '📊 Сформировать отчет':
-        await state.update_data(works_list=[])
         works = await get_active_works()
         if not works:
             await message.answer("📝 Нет доступных работ для отчета. Обратитесь к администратору.")
             return
-        keyboard = [[KeyboardButton(text=work['Название работы'])] for work in works]
-        keyboard.append([KeyboardButton(text='📤 Завершить отчет')])
-        keyboard.append([KeyboardButton(text='↩️ Назад')])
-        await state.update_data(works=works)
-        reply_markup = ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
-        await message.answer("Выберите выполненную работу:", reply_markup=reply_markup)
-        await state.set_state(Form.selecting_work)
+        category_map = build_category_map(works)
+        await state.update_data(
+            works_list=[],
+            all_works=works,
+            categories=category_map,
+            works=[]
+        )
+        await message.answer(
+            "Выберите раздел:",
+            reply_markup=get_category_keyboard(category_map)
+        )
+        await state.set_state(Form.selecting_category)
     elif text == '👥 Отправить фото отчет (Люди)':
         await message.answer(
             "👥 Вы выбрали отправку фотоотчета с людьми.\n"
@@ -946,6 +965,65 @@ async def handle_main_menu(message: types.Message, state: FSMContext):
         🔧 По всем вопросам обращайтесь к администратору.
         """
         await message.answer(help_text)
+
+@dp.message(Form.selecting_category)
+async def handle_category_selection(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+
+    if message.text == '↩️ Назад':
+        await message.answer("Главное меню:", reply_markup=get_main_keyboard(user_id))
+        await state.set_state(Form.selecting_action)
+        return
+
+    has_access, error_msg = await check_access(user_id)
+    if not has_access:
+        await message.answer(error_msg)
+        await state.set_state(Form.selecting_action)
+        return
+
+    data = await state.get_data()
+    category_map = data.get('categories', {}) or {}
+
+    selected_category = None
+    normalized_input = (message.text or '').strip().lower()
+    for display_name in category_map.keys():
+        if display_name.lower() == normalized_input:
+            selected_category = display_name
+            break
+
+    if not selected_category:
+        if not category_map:
+            await message.answer(
+                "📝 Нет доступных разделов. Обратитесь к администратору.",
+                reply_markup=get_main_keyboard(user_id)
+            )
+            await state.set_state(Form.selecting_action)
+            return
+        await message.answer(
+            "❌ Такой раздел не найден. Пожалуйста, выберите из списка:",
+            reply_markup=get_category_keyboard(category_map)
+        )
+        return
+
+    works_in_category = category_map.get(selected_category, [])
+    if not works_in_category:
+        await message.answer(
+            "📝 В этом разделе пока нет работ. Выберите другой раздел:",
+            reply_markup=get_category_keyboard(category_map)
+        )
+        return
+
+    keyboard = [[KeyboardButton(text=work['Название работы'])] for work in works_in_category]
+    keyboard.append([KeyboardButton(text='📤 Завершить отчет')])
+    keyboard.append([KeyboardButton(text='↩️ Назад')])
+
+    await state.update_data(current_category=selected_category, works=works_in_category)
+
+    await message.answer(
+        f"Раздел: {selected_category}\nВыберите выполненную работу:",
+        reply_markup=ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+    )
+    await state.set_state(Form.selecting_work)
 
 # НОВЫЕ ОБРАБОТЧИКИ ДЛЯ РУКОВОДИТЕЛЯ
 @dp.message(Form.manager_selecting_report_type)
@@ -1108,8 +1186,17 @@ async def handle_work_selection(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
 
     if message.text == '↩️ Назад':
-        await message.answer("Главное меню:", reply_markup=get_main_keyboard(message.from_user.id))
-        await state.set_state(Form.selecting_action)
+        data = await state.get_data()
+        category_map = data.get('categories', {}) or {}
+        if category_map:
+            await message.answer(
+                "Выберите раздел:",
+                reply_markup=get_category_keyboard(category_map)
+            )
+            await state.set_state(Form.selecting_category)
+        else:
+            await message.answer("Главное меню:", reply_markup=get_main_keyboard(message.from_user.id))
+            await state.set_state(Form.selecting_action)
         return
     if message.text == '📤 Завершить отчет':
         data = await state.get_data()
@@ -1154,11 +1241,27 @@ async def handle_work_quantity(message: types.Message, state: FSMContext):
 
     if message.text == '↩️ Назад':
         data = await state.get_data()
-        works = data.get('works', [])
-        keyboard = [[KeyboardButton(text=w['Название работы'])] for w in works]
-        keyboard += [[KeyboardButton(text='📤 Завершить отчет')], [KeyboardButton(text='↩️ Назад')]]
-        await message.answer("Выберите выполненную работу:", reply_markup=ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True))
-        await state.set_state(Form.selecting_work)
+        category_map = data.get('categories')
+        works = data.get('all_works')
+        if not works:
+            works = await get_active_works()
+            if works:
+                await state.update_data(all_works=works)
+        if not category_map and works:
+            category_map = build_category_map(works)
+        if category_map:
+            await state.update_data(categories=category_map, works=[])
+            await message.answer(
+                "Выберите раздел:",
+                reply_markup=get_category_keyboard(category_map)
+            )
+            await state.set_state(Form.selecting_category)
+        else:
+            await message.answer(
+                "📝 Нет доступных работ для добавления. Обратитесь к администратору.",
+                reply_markup=get_main_keyboard(user_id)
+            )
+            await state.set_state(Form.selecting_action)
         return
 
     has_access, error_msg = await check_access(user_id)
