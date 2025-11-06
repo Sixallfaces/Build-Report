@@ -992,11 +992,7 @@
                     <input type="time" id="reportTime" step="1" required>
                 </div>
 
-                <div class="modal-form-group">
-                    <label for="reportPhotoUrl">Ссылка на фото (необязательно)</label>
-                    <input type="url" id="reportPhotoUrl" placeholder="https://...">
-                    <p class="modal-note">Вы можете добавить ссылку на фотоотчет из облака. Если поле оставить пустым, отчет сохранится без фото.</p>
-                </div>
+                <p class="modal-note">Папка для фотоотчета создается автоматически на Яндекс.Диске при отправке отчета.</p>
 
                 <div class="modal-actions">
                     <button type="button" onclick="closeSendReportModal()" class="secondary">Отмена</button>
@@ -1902,7 +1898,6 @@
         const quantityInput = document.getElementById('reportQuantity');
         const dateInput = document.getElementById('reportDate');
         const timeInput = document.getElementById('reportTime');
-        const photoInput = document.getElementById('reportPhotoUrl');
         const submitButton = document.getElementById('submitReportButton');
 
         if (submitButton) {
@@ -1936,15 +1931,12 @@
                 reportTime += ':00';
             }
 
-            const photoUrl = photoInput && photoInput.value ? photoInput.value.trim() : '';
-
             const payload = {
                 foreman_id: foremanIdValue,
                 work_id: workIdValue,
                 quantity: quantityValue,
                 report_date: reportDate,
-                report_time: reportTime,
-                photo_report_url: photoUrl
+                report_time: reportTime
             };
 
             const response = await makeApiRequest(API_CONFIG.ENDPOINTS.WORK_REPORTS, {

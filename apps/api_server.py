@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 import json
 import logging
+import os
+import re
 from datetime import datetime
 import traceback
 import hashlib
@@ -15,11 +17,17 @@ from openpyxl import Workbook
 import io
 from fastapi import UploadFile, File
 from fastapi.responses import StreamingResponse
+import requests
 
 # --- Настройки ---
 DB_PATH = '/opt/stroykontrol/database/stroykontrol.db'
 API_HOST = '127.0.0.1'
 API_PORT = 8080
+
+# --- Настройки Яндекс.Диска ---
+YANDEX_DISK_TOKEN = os.getenv('YANDEX_DISK_TOKEN')
+YANDEX_DISK_BASE_FOLDER = os.getenv('YANDEX_DISK_BASE_FOLDER', 'StroyKontrol')
+
 
 # --- Настройка логирования ---
 logging.basicConfig(level=logging.INFO)
@@ -36,6 +44,139 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Вспомогательные функции для работы с Яндекс.Диском ---
+def _get_yandex_headers():
+    if not YANDEX_DISK_TOKEN:
+        logger.error("❌ Токен Яндекс.Диска не задан. Укажите переменную окружения YANDEX_DISK_TOKEN")
+        return None
+    return {
+        'Authorization': f'OAuth {YANDEX_DISK_TOKEN}',
+        'Content-Type': 'application/json'
+    }
+
+
+def sanitize_folder_component(component: str) -> str:
+    safe = re.sub(r'[^\w\-]', '_', component or '')
+    return safe or 'unknown'
+
+
+def setup_yandex_disk() -> bool:
+    headers = _get_yandex_headers()
+    if headers is None:
+        return False
+    try:
+        response = requests.get('https://cloud-api.yandex.net/v1/disk/', headers=headers, timeout=10)
+        if response.status_code == 200:
+            return True
+        logger.error(f"❌ Ошибка подключения к Яндекс.Диску: {response.status_code} - {response.text}")
+    except requests.RequestException as exc:
+        logger.error(f"❌ Исключение при подключении к Яндекс.Диску: {exc}")
+    return False
+
+
+def create_yandex_folder(folder_path: str) -> bool:
+    headers = _get_yandex_headers()
+    if headers is None:
+        return False
+
+    if not folder_path.startswith('/'):
+        folder_path = '/' + folder_path
+
+    params = {'path': folder_path}
+    try:
+        response = requests.put(
+            'https://cloud-api.yandex.net/v1/disk/resources',
+            headers=headers,
+            params=params,
+            timeout=10
+        )
+        if response.status_code in (200, 201):
+            logger.info(f"✅ Папка на Яндекс.Диске создана: {folder_path}")
+            return True
+        if response.status_code == 409:
+            logger.info(f"ℹ️ Папка на Яндекс.Диске уже существует: {folder_path}")
+            return True
+        logger.error(f"❌ Ошибка создания папки на Яндекс.Диске: {response.status_code} - {response.text}")
+    except requests.RequestException as exc:
+        logger.error(f"❌ Исключение при создании папки на Яндекс.Диске: {exc}")
+    return False
+
+
+def publish_yandex_folder(folder_path: str) -> Optional[str]:
+    headers = _get_yandex_headers()
+    if headers is None:
+        return None
+
+    if folder_path.startswith('/'):
+        folder_path = folder_path[1:]
+
+    try:
+        publish_response = requests.put(
+            'https://cloud-api.yandex.net/v1/disk/resources/publish',
+            headers=headers,
+            params={'path': folder_path},
+            timeout=10
+        )
+        if publish_response.status_code not in (200, 201):
+            logger.error(
+                f"❌ Не удалось опубликовать папку {folder_path}: {publish_response.status_code} - {publish_response.text}"
+            )
+            return None
+
+        info_response = requests.get(
+            'https://cloud-api.yandex.net/v1/disk/resources',
+            headers=headers,
+            params={'path': folder_path, 'fields': 'public_url'},
+            timeout=10
+        )
+        if info_response.status_code == 200:
+            public_url = info_response.json().get('public_url')
+            if public_url:
+                logger.info(f"🔗 Получена ссылка на папку: {public_url}")
+                return public_url
+        logger.error(
+            f"❌ Не удалось получить ссылку на папку {folder_path}: {info_response.status_code} - {info_response.text}"
+        )
+    except requests.RequestException as exc:
+        logger.error(f"❌ Исключение при публикации папки на Яндекс.Диске: {exc}")
+    return None
+
+
+async def ensure_report_folder(db, foreman_id: Optional[int], report_date: str) -> Optional[str]:
+    if foreman_id is None or report_date is None:
+        return None
+
+    if not setup_yandex_disk():
+        return None
+
+    async with db.execute(
+        "SELECT first_name FROM foremen WHERE id = ?",
+        (foreman_id,)
+    ) as cursor:
+        row = await cursor.fetchone()
+
+    if not row:
+        logger.warning(f"⚠️ Не удалось найти бригадира ID {foreman_id} для создания папки отчета")
+        return None
+
+    foreman_name = sanitize_folder_component(row[0])
+    base_folder = sanitize_folder_component(YANDEX_DISK_BASE_FOLDER or 'StroyKontrol')
+    date_folder = sanitize_folder_component(report_date)
+
+    base_folder_path = f"/{base_folder}"
+    if not create_yandex_folder(base_folder_path):
+        return None
+
+    date_folder_path = f"{base_folder_path}/{date_folder}"
+    if not create_yandex_folder(date_folder_path):
+        return None
+
+    foreman_folder_path = f"{date_folder_path}/{foreman_name}_ID_{foreman_id}"
+    if not create_yandex_folder(foreman_folder_path):
+        return None
+
+    return publish_yandex_folder(foreman_folder_path)
 
 # Хэш-функция для паролей
 def hash_password(password: str) -> str:
@@ -985,6 +1126,15 @@ async def update_report_in_db(report_id: int, report_data: dict):
                     await db.rollback()
                     return False, "Недостаточно материалов на балансе для новой работы"
             
+            auto_photo_url = report_data.get('photo_report_url')
+            if not auto_photo_url:
+                auto_photo_url = await ensure_report_folder(
+                    db,
+                    report_data.get('foreman_id'),
+                    report_data.get('report_date')
+                )
+
+
             # Вычитаем новое количество из баланса
             await db.execute(
                 "UPDATE works SET balance = balance - ? WHERE id = ?",
@@ -993,13 +1143,13 @@ async def update_report_in_db(report_id: int, report_data: dict):
             
             # Обновляем отчет
             await db.execute(
-                '''UPDATE work_reports 
-                   SET work_id = ?, quantity = ?, report_date = ?, 
-                       report_time = ?, photo_report_url = ? 
+                '''UPDATE work_reports
+                   SET work_id = ?, quantity = ?, report_date = ?,
+                       report_time = ?, photo_report_url = ?
                    WHERE id = ?''',
-                (report_data['work_id'], report_data['quantity'], 
+                (report_data['work_id'], report_data['quantity'],
                  report_data['report_date'], report_data['report_time'],
-                 report_data.get('photo_report_url', ''), report_id)
+                 auto_photo_url or '', report_id)
             )
             
             await db.commit()
@@ -1135,13 +1285,21 @@ async def create_work_report_in_db(report_data: dict):
                         )
 
                 # Создаем отчет и получаем его ID
+
+                auto_photo_url = await ensure_report_folder(
+                    db,
+                    report_data.get('foreman_id'),
+                    report_data.get('report_date')
+                )
+                photo_value = auto_photo_url or report_data.get('photo_report_url', '')
+
                 cursor = await db.execute(
                     '''INSERT INTO work_reports
                        (foreman_id, work_id, quantity, report_date, report_time, photo_report_url)
                        VALUES (?, ?, ?, ?, ?, ?)''',
                     (report_data['foreman_id'], report_data['work_id'], report_data['quantity'],
                      report_data['report_date'], report_data['report_time'],
-                     report_data.get('photo_report_url', ''))
+                     photo_value)
                 )
                 report_id = cursor.lastrowid
 
@@ -1257,6 +1415,15 @@ async def update_work_report_in_db(report_id: int, report_data: dict):
                             f"Недостаточно материала \"{requirement['material_name']}\" на складе"
                         )
 
+                auto_photo_url = report_data.get('photo_report_url')
+                if not auto_photo_url:
+                    auto_photo_url = await ensure_report_folder(
+                        db,
+                        report_data.get('foreman_id'),
+                        report_data.get('report_date')
+                    )
+
+
                 # Вычитаем новое количество из баланса работы
                 await db.execute(
                     "UPDATE works SET balance = balance - ? WHERE id = ?",
@@ -1289,7 +1456,7 @@ async def update_work_report_in_db(report_id: int, report_data: dict):
                        WHERE id = ?''',
                     (report_data['foreman_id'], report_data['work_id'], report_data['quantity'],
                      report_data['report_date'], report_data['report_time'],
-                     report_data.get('photo_report_url', ''), report_id)
+                     auto_photo_url or '', report_id)
                 )
 
                 await db.commit()
