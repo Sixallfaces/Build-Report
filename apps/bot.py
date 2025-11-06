@@ -14,6 +14,7 @@ import logging
 import traceback
 import urllib.parse
 import aiosqlite # Импортируем aiosqlite
+from typing import Optional
 
 # Настройка логирования
 logging.basicConfig(
@@ -240,7 +241,63 @@ async def _fetch_work_materials_requirements(db, work_id: int):
             })
         return materials
 
-async def update_work_balance(work_id: int, quantity_used: float):
+async def _get_foreman_display_name(db, foreman_id: Optional[int]) -> str:
+    """Возвращает отображаемое имя бригадира."""
+    if foreman_id is None:
+        return 'Неизвестный бригадир'
+
+    async with db.execute(
+        "SELECT first_name, last_name FROM foremen WHERE id = ?",
+        (foreman_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+        if row:
+            first_name, last_name = row
+            parts = [part for part in [first_name, last_name] if part]
+            if parts:
+                return f"Бригадир {' '.join(parts)}"
+
+    return f"Бригадир ID {foreman_id}"
+
+
+async def _log_material_history_entry(
+    db,
+    material_id: int,
+    change_amount: float,
+    change_type: str,
+    performed_by: Optional[str] = None,
+    description: Optional[str] = None,
+):
+    """Добавляет запись в историю движения материалов."""
+    performed_by_value = (performed_by or 'Неизвестно').strip() or 'Неизвестно'
+    description_value = (description or '').strip()
+
+    resulting_quantity = None
+    async with db.execute(
+        "SELECT quantity FROM materials WHERE id = ?",
+        (material_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+        if row is not None:
+            resulting_quantity = row[0]
+
+    await db.execute(
+        '''INSERT INTO material_history
+           (material_id, change_type, change_amount, resulting_quantity, performed_by, description, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)''',
+        (
+            material_id,
+            change_type,
+            change_amount,
+            resulting_quantity,
+            performed_by_value,
+            description_value,
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        ),
+    )
+
+
+async def update_work_balance(work_id: int, quantity_used: float, foreman_id: Optional[int] = None):
     """Обновляет баланс работы и списывает материалы на складе."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
@@ -281,6 +338,8 @@ async def update_work_balance(work_id: int, quantity_used: float):
                     (new_balance, work_id)
                 )
 
+                performed_by = await _get_foreman_display_name(db, foreman_id)
+
                 # Списываем материалы со склада
                 for requirement in materials_requirements:
                     total_required = requirement['quantity_per_unit'] * quantity_used
@@ -289,6 +348,14 @@ async def update_work_balance(work_id: int, quantity_used: float):
                     await db.execute(
                         "UPDATE materials SET quantity = quantity - ? WHERE id = ?",
                         (total_required, requirement['material_id'])
+                    )
+                    await _log_material_history_entry(
+                        db,
+                        requirement['material_id'],
+                        -total_required,
+                        'Списание',
+                        performed_by,
+                        f"Списание по отчету работы ID {work_id}",
                     )
 
                 await db.commit()
@@ -1168,7 +1235,7 @@ async def save_report_with_photo(message: types.Message, state: FSMContext, phot
         quantity = data.get('quantity', 0)
         works_list = data.get('works_list', [])
 
-        success, result = await update_work_balance(work_id, quantity) # Передаем ID
+        success, result = await update_work_balance(work_id, quantity, message.from_user.id) # Передаем ID
         if not success:
             await message.answer(result, reply_markup=get_main_keyboard(message.from_user.id))
             await state.set_state(Form.selecting_action)
