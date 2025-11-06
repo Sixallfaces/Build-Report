@@ -963,7 +963,7 @@
                     <button id="addMaterial" class="success">➕ Добавить материал</button>
                     <button id="exportMaterials" class="secondary">📥 Выгрузка данных</button>
                     <button id="importMaterials" class="secondary">📤 Загрузка на сервер</button>
-                    <button id="downloadMaterialsTemplate" class="secondary">📄 Шаблон Excel</button>
+                    <button id="toggleMaterialsHistory" class="secondary">📜 История</button>
                     <input type="file" id="materialsImportInput" accept=".xlsx,.xls" style="display: none;">
                     <div class="search-box">
                         <input type="text" id="searchMaterials" placeholder="Поиск по материалам...">
@@ -972,7 +972,7 @@
 
                 <div class="loading" id="materialsLoading">Загрузка...</div>
 
-                <div class="table-container">
+                <div class="table-container" id="materialsTableContainer">
                     <table id="materialsTable">
                         <thead>
                             <tr>
@@ -985,6 +985,26 @@
                             </tr>
                         </thead>
                         <tbody id="materialsTableBody"></tbody>
+                    </table>
+                </div>
+
+                <div class="loading" id="materialsHistoryLoading" style="display: none;">Загрузка истории...</div>
+
+                <div class="table-container" id="materialHistoryContainer" style="display: none;">
+                    <table id="materialHistoryTable">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Материал</th>
+                                <th>Действие</th>
+                                <th>Изменение</th>
+                                <th>Остаток</th>
+                                <th>Описание</th>
+                                <th>Кем</th>
+                                <th>Когда</th>
+                            </tr>
+                        </thead>
+                        <tbody id="materialHistoryTableBody"></tbody>
                     </table>
                 </div>
             </div>
@@ -1157,6 +1177,7 @@
             WORKS: 'api/works',
             ALL_WORKS: 'api/all-works',
             MATERIALS: 'api/materials',
+            MATERIALS_HISTORY: 'api/materials/history',
             MATERIALS_EXPORT: 'api/materials/export',
             MATERIALS_IMPORT: 'api/materials/import',
             MATERIALS_TEMPLATE: 'api/materials/template',
@@ -1197,6 +1218,9 @@
     let currentMaterialIdForQuantity = null;
     let currentMaterialQuantity = 0;
     let currentMaterialUnit = '';
+    let materialHistory = [];
+    let materialHistoryLoaded = false;
+    let isMaterialHistoryView = false;
 
     // Переменные для сортировки
     let currentSortColumn = -1;
@@ -1333,12 +1357,12 @@
     // ИСПРАВЛЕННАЯ ФУНКЦИЯ ДЛЯ API ЗАПРОСОВ
     async function makeApiRequest(endpoint, options = {}) {
         const token = localStorage.getItem('token');
-        
+
         const headers = {
             'Content-Type': 'application/json',
             ...options.headers
         };
-        
+
         if (token) {
             headers['Authorization'] = `Bearer ${token}`;
         }
@@ -1376,6 +1400,21 @@
             };
         }
     }
+
+    function getCurrentUsername() {
+        try {
+            const userRaw = localStorage.getItem('user');
+            if (!userRaw) {
+                return 'Неизвестный пользователь';
+            }
+            const user = JSON.parse(userRaw);
+            return user?.username || user?.login || user?.name || 'Неизвестный пользователь';
+        } catch (error) {
+            console.error('Не удалось определить имя пользователя:', error);
+            return 'Неизвестный пользователь';
+        }
+    }
+
 
     // Обработчик нажатия Enter в форме входа
     document.addEventListener('DOMContentLoaded', function() {
@@ -1476,14 +1515,14 @@
         const addMaterialBtn = document.getElementById('addMaterial');
         const exportMaterialsBtn = document.getElementById('exportMaterials');
         const importMaterialsBtn = document.getElementById('importMaterials');
-        const templateMaterialsBtn = document.getElementById('downloadMaterialsTemplate');
+        const toggleHistoryBtn = document.getElementById('toggleMaterialsHistory');
         const importInput = document.getElementById('materialsImportInput');
         const searchInput = document.getElementById('searchMaterials');
 
         if (addMaterialBtn) addMaterialBtn.addEventListener('click', addNewMaterial);
         if (exportMaterialsBtn) exportMaterialsBtn.addEventListener('click', exportMaterialsToExcel);
         if (importMaterialsBtn) importMaterialsBtn.addEventListener('click', triggerImportMaterials);
-        if (templateMaterialsBtn) templateMaterialsBtn.addEventListener('click', downloadMaterialsTemplate);
+        if (toggleHistoryBtn) toggleHistoryBtn.addEventListener('click', toggleMaterialHistoryView);
         if (importInput) importInput.addEventListener('change', handleMaterialsImport);
         if (searchInput) searchInput.addEventListener('input', filterMaterials);
     }
@@ -2600,8 +2639,179 @@
         });
     }
 
+    async function loadMaterialHistory(forceReload = false) {
+        const loadingElement = document.getElementById('materialsHistoryLoading');
+        const tableBody = document.getElementById('materialHistoryTableBody');
+
+        if (!loadingElement || !tableBody) return;
+
+        if (forceReload) {
+            materialHistoryLoaded = false;
+        }
+
+        if (materialHistoryLoaded && !forceReload) {
+            displayMaterialHistory(materialHistory);
+            return;
+        }
+
+        loadingElement.style.display = 'block';
+        tableBody.innerHTML = '';
+
+        try {
+            const data = await makeApiRequest(API_CONFIG.ENDPOINTS.MATERIALS_HISTORY);
+            if (data.success) {
+                materialHistory = data.data || [];
+                materialHistoryLoaded = true;
+                displayMaterialHistory(materialHistory);
+            } else {
+                showNotification('Ошибка при загрузке истории материалов: ' + (data.error || 'Неизвестная ошибка'), 'error');
+            }
+        } catch (error) {
+            showNotification('Ошибка при загрузке истории материалов: ' + error.message, 'error');
+        } finally {
+            loadingElement.style.display = 'none';
+        }
+    }
+
+    function formatHistoryNumber(value, unit) {
+        if (value === null || value === undefined || value === '') {
+            return '';
+        }
+        const numberValue = Number(value);
+        if (!Number.isFinite(numberValue)) {
+            return value;
+        }
+        const formatted = numberValue.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+        return unit ? `${formatted} ${unit}` : formatted;
+    }
+
+    function formatHistoryChange(amount, unit) {
+        if (amount === null || amount === undefined || amount === '') {
+            return '';
+        }
+        const numberValue = Number(amount);
+        if (!Number.isFinite(numberValue)) {
+            return amount;
+        }
+        const sign = numberValue > 0 ? '+' : '';
+        const formatted = Math.abs(numberValue).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+        return unit ? `${sign}${formatted} ${unit}` : `${sign}${formatted}`;
+    }
+
+    function formatHistoryDate(dateValue) {
+        if (!dateValue) {
+            return '';
+        }
+        const normalized = typeof dateValue === 'string' ? dateValue.replace(' ', 'T') : dateValue;
+        const date = new Date(normalized);
+        if (Number.isNaN(date.getTime())) {
+            return dateValue;
+        }
+        return date.toLocaleString('ru-RU');
+    }
+
+    function displayMaterialHistory(historyToDisplay = materialHistory) {
+        const tableBody = document.getElementById('materialHistoryTableBody');
+        if (!tableBody) return;
+
+        tableBody.innerHTML = '';
+
+        if (!historyToDisplay || historyToDisplay.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="8" style="text-align: center;">Нет данных об истории материалов</td></tr>';
+            return;
+        }
+
+        historyToDisplay.forEach(entry => {
+            const row = document.createElement('tr');
+            const unit = entry.unit || '';
+            row.innerHTML = `
+                <td>${entry.id ?? ''}</td>
+                <td>${entry.material_name || '-'}</td>
+                <td>${entry.change_type || '-'}</td>
+                <td>${formatHistoryChange(entry.change_amount, unit)}</td>
+                <td>${formatHistoryNumber(entry.resulting_quantity, unit)}</td>
+                <td>${entry.description || ''}</td>
+                <td>${entry.performed_by || ''}</td>
+                <td>${formatHistoryDate(entry.created_at)}</td>
+            `;
+            tableBody.appendChild(row);
+        });
+    }
+
+    function filterMaterialHistory(query) {
+        if (!query) {
+            displayMaterialHistory(materialHistory);
+            return;
+        }
+
+        const normalized = query.toLowerCase();
+        const filtered = materialHistory.filter(entry => {
+            return [
+                entry.id,
+                entry.material_id,
+                entry.material_name,
+                entry.change_type,
+                entry.change_amount,
+                entry.resulting_quantity,
+                entry.performed_by,
+                entry.description,
+                entry.created_at
+            ].some(value => value !== undefined && value !== null && String(value).toLowerCase().includes(normalized));
+        });
+
+        displayMaterialHistory(filtered);
+    }
+
+    async function toggleMaterialHistoryView() {
+        const button = document.getElementById('toggleMaterialsHistory');
+        const materialsContainer = document.getElementById('materialsTableContainer');
+        const historyContainer = document.getElementById('materialHistoryContainer');
+        const materialsLoading = document.getElementById('materialsLoading');
+        const historyLoading = document.getElementById('materialsHistoryLoading');
+        const searchInput = document.getElementById('searchMaterials');
+
+        if (!button || !materialsContainer || !historyContainer) {
+            return;
+        }
+
+        if (!isMaterialHistoryView) {
+            isMaterialHistoryView = true;
+            button.textContent = '📦 Материалы';
+            materialsContainer.style.display = 'none';
+            if (materialsLoading) {
+                materialsLoading.style.display = 'none';
+            }
+            historyContainer.style.display = 'block';
+            if (historyLoading) {
+                historyLoading.style.display = 'block';
+            }
+            await loadMaterialHistory(true);
+            if (searchInput && searchInput.value) {
+                filterMaterialHistory(searchInput.value.toLowerCase());
+            }
+        } else {
+            isMaterialHistoryView = false;
+            button.textContent = '📜 История';
+            historyContainer.style.display = 'none';
+            if (historyLoading) {
+                historyLoading.style.display = 'none';
+            }
+            materialsContainer.style.display = 'block';
+            if (searchInput) {
+                filterMaterials({ target: searchInput });
+            } else {
+                displayMaterials(materials);
+            }
+        }
+    }
+
     function filterMaterials(event) {
         const query = (event.target.value || '').toLowerCase();
+
+        if (isMaterialHistoryView) {
+            filterMaterialHistory(query);
+            return;
+        }
 
         if (!query) {
             displayMaterials(materials);
@@ -2679,6 +2889,8 @@
             materialData[field] = input.value;
         });
 
+        materialData.performed_by = getCurrentUsername();
+
         if (!materialData.name || !materialData.category || !materialData.unit) {
             showNotification('Заполните все обязательные поля для материала', 'error');
             return;
@@ -2698,6 +2910,7 @@
 
             if (response && response.success) {
                 showNotification('Материал успешно добавлен', 'success');
+                materialHistoryLoaded = false;
                 await loadMaterials();
             } else {
                 const errorMessage = response?.detail || response?.error || 'Не удалось добавить материал';
@@ -2722,6 +2935,8 @@
             materialData[field] = input.value;
         });
 
+        materialData.performed_by = getCurrentUsername();
+
         if (!materialData.name || !materialData.category || !materialData.unit) {
             showNotification('Заполните все обязательные поля для материала', 'error');
             return;
@@ -2741,6 +2956,7 @@
 
             if (response && response.success) {
                 showNotification('Материал успешно обновлен', 'success');
+                materialHistoryLoaded = false;
                 await loadMaterials();
             } else {
                 const errorMessage = response?.detail || response?.error || 'Не удалось обновить материал';
@@ -2763,6 +2979,7 @@
 
             if (response && response.success) {
                 showNotification('Материал успешно удален', 'success');
+                materialHistoryLoaded = false;
                 await loadMaterials();
             } else {
                 const errorMessage = response?.detail || response?.error || 'Не удалось удалить материал';
@@ -2838,6 +3055,7 @@
             }
 
             await loadMaterials();
+            materialHistoryLoaded = false;
 
             let message = result.message || 'Импорт успешно выполнен';
             if (result.errors && result.errors.length > 0) {
@@ -3185,7 +3403,11 @@
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${localStorage.getItem('token')}`
                 },
-                body: JSON.stringify({ amount })
+                body: JSON.stringify({
+                    amount,
+                    performed_by: getCurrentUsername(),
+                    description: 'Пополнение через панель управления'
+                })
             });
 
             if (!response.ok) {
@@ -3199,6 +3421,7 @@
                 const newQuantity = previousQuantity + amount;
                 showNotification('Количество материала обновлено', 'success');
                 closeAddMaterialQuantityModal();
+                materialHistoryLoaded = false;
 
                 const quantityInput = document.querySelector(`#materialsTableBody tr[data-material-id="${materialId}"] input[data-field="quantity"]`);
                 if (quantityInput) {

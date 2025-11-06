@@ -263,6 +263,23 @@ async def get_foremen_from_db():
     except Exception as e:
         logger.error(f"⚠️ Ошибка получения бригадиров: {e}")
         return []
+    
+async def get_foreman_display_name(db, foreman_id: Optional[int]) -> str:
+    """Возвращает отображаемое имя бригадира"""
+    if foreman_id is None:
+        return 'Неизвестный бригадир'
+
+    async with db.execute(
+        "SELECT first_name, last_name FROM foremen WHERE id = ?",
+        (foreman_id,)
+    ) as cursor:
+        row = await cursor.fetchone()
+        if row:
+            first_name, last_name = row
+            parts = [part for part in [first_name, last_name] if part]
+            if parts:
+                return f"Бригадир {' '.join(parts)}"
+    return f"Бригадир ID {foreman_id}"
 
 async def create_foreman_in_db(foreman_data: dict):
     """Создает нового бригадира в базе данных."""
@@ -435,7 +452,96 @@ async def init_work_materials_table():
                 FOREIGN KEY (material_id) REFERENCES materials(id) ON DELETE CASCADE
             )
         ''')
-        await db.commit()        
+        await db.commit()
+
+async def init_material_history_table():
+    """Создает таблицу истории движения материалов"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS material_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                material_id INTEGER NOT NULL,
+                change_type TEXT NOT NULL,
+                change_amount REAL NOT NULL,
+                resulting_quantity REAL,
+                performed_by TEXT,
+                description TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (material_id) REFERENCES materials(id) ON DELETE CASCADE
+            )
+        ''')
+        await db.commit()
+
+async def log_material_history_entry(
+    db,
+    material_id: int,
+    change_amount: float,
+    change_type: str,
+    performed_by: Optional[str] = None,
+    description: Optional[str] = None
+):
+    """Добавляет запись в историю движения материалов"""
+    performed_by_value = (performed_by or 'Неизвестно').strip() or 'Неизвестно'
+    description_value = (description or '').strip()
+
+    resulting_quantity = None
+    async with db.execute(
+        "SELECT quantity FROM materials WHERE id = ?",
+        (material_id,)
+    ) as cursor:
+        row = await cursor.fetchone()
+        if row is not None:
+            resulting_quantity = row[0]
+
+    await db.execute(
+        '''INSERT INTO material_history
+           (material_id, change_type, change_amount, resulting_quantity, performed_by, description, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)''',
+        (
+            material_id,
+            change_type,
+            change_amount,
+            resulting_quantity,
+            performed_by_value,
+            description_value,
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        )
+    )
+
+async def get_material_history_from_db(limit: int = 500):
+    """Возвращает историю движения материалов"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                '''SELECT mh.id, mh.material_id, m.name, m.unit, mh.change_type, mh.change_amount,
+                          mh.resulting_quantity, mh.performed_by, mh.description, mh.created_at
+                   FROM material_history mh
+                   LEFT JOIN materials m ON m.id = mh.material_id
+                   ORDER BY mh.created_at DESC, mh.id DESC
+                   LIMIT ?''',
+                (limit,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                history = []
+                for row in rows:
+                    (entry_id, material_id, material_name, unit, change_type, change_amount,
+                     resulting_quantity, performed_by, description, created_at) = row
+                    history.append({
+                        'id': entry_id,
+                        'material_id': material_id,
+                        'material_name': material_name,
+                        'unit': unit,
+                        'change_type': change_type,
+                        'change_amount': change_amount,
+                        'resulting_quantity': resulting_quantity,
+                        'performed_by': performed_by,
+                        'description': description,
+                        'created_at': created_at
+                    })
+                return history
+    except Exception as e:
+        logger.error(f"⚠️ Ошибка получения истории материалов: {e}")
+        return []        
 
 async def get_all_materials_from_db():
     """Получает список всех материалов"""
@@ -547,7 +653,7 @@ async def replace_work_materials_for_work(work_id: int, materials_data: List[dic
         return False, str(e)
 
 
-async def insert_material_to_db(material_data: dict):
+async def insert_material_to_db(material_data: dict, performed_by: Optional[str] = None):
     """Добавляет новый материал"""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
@@ -561,18 +667,37 @@ async def insert_material_to_db(material_data: dict):
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 )
             )
-            await db.commit()
+            
             material_id = cursor.lastrowid
             logger.info(f"📦 Добавлен новый материал: {material_data['name']} (ID: {material_id})")
+            await log_material_history_entry(
+                db,
+                material_id,
+                material_data['quantity'],
+                'Создание',
+                performed_by or 'Система',
+                'Создание материала'
+            )
+            await db.commit()
             return material_id
     except Exception as e:
         logger.error(f"⚠️ Ошибка добавления материала {material_data}: {e}")
         raise
 
-async def update_material_in_db(material_id: int, material_data: dict):
+async def update_material_in_db(material_id: int, material_data: dict, performed_by: Optional[str] = None):
     """Обновляет материал"""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
+
+            async with db.execute(
+                "SELECT quantity FROM materials WHERE id = ?",
+                (material_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if not row:
+                    return False
+                previous_quantity = row[0] if row[0] is not None else 0
+
             cursor = await db.execute(
                 "UPDATE materials SET category = ?, name = ?, unit = ?, quantity = ? WHERE id = ?",
                 (
@@ -583,9 +708,21 @@ async def update_material_in_db(material_id: int, material_data: dict):
                     material_id
                 )
             )
-            await db.commit()
-            if cursor.rowcount and cursor.rowcount > 0:
+            row_updated = cursor.rowcount and cursor.rowcount > 0
+            if row_updated:
                 logger.info(f"📦 Обновлен материал ID: {material_id}")
+                change_amount = material_data['quantity'] - previous_quantity
+                if abs(change_amount) > 0:
+                    await log_material_history_entry(
+                        db,
+                        material_id,
+                        change_amount,
+                        'Корректировка',
+                        performed_by or 'Система',
+                        'Обновление данных материала'
+                    )
+            await db.commit()
+            if row_updated:
                 return True
         return False
     except Exception as e:
@@ -593,7 +730,14 @@ async def update_material_in_db(material_id: int, material_data: dict):
         return False
     
 async def add_quantity_to_material_in_db(material_id: int, amount: float):
-    """Увеличивает количество материала на складе"""
+    async def add_quantity_to_material_in_db(
+    material_id: int,
+    amount: float,
+    performed_by: Optional[str] = None,
+    description: Optional[str] = None
+):
+        
+     """Увеличивает количество материала на складе"""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             try:
@@ -615,6 +759,14 @@ async def add_quantity_to_material_in_db(material_id: int, amount: float):
                 await db.execute(
                     "UPDATE materials SET quantity = ? WHERE id = ?",
                     (new_quantity, material_id)
+                )
+                await log_material_history_entry(
+                    db,
+                    material_id,
+                    amount,
+                    'Пополнение',
+                    performed_by or 'Система',
+                    description or 'Пополнение запаса'
                 )
                 await db.commit()
                 logger.info(
@@ -868,14 +1020,17 @@ async def delete_report_from_db(report_id: int):
 
                 # Получаем данные отчета для восстановления баланса
                 async with db.execute(
-                    "SELECT work_id, quantity FROM work_reports WHERE id = ?",
+                    "SELECT work_id, quantity, foreman_id FROM work_reports WHERE id = ?",
                     (report_id,)
                 ) as cursor:
                     row = await cursor.fetchone()
                     if not row:
                         return False, "Отчет не найден"
 
-                    work_id, quantity = row
+                    work_id, quantity, foreman_id = row
+
+                foreman_display = await get_foreman_display_name(db, foreman_id)
+                deletion_display = f"{foreman_display} (удаление отчета ID {report_id})"
 
                 # Восстанавливаем баланс работы
                 await db.execute(
@@ -892,6 +1047,14 @@ async def delete_report_from_db(report_id: int):
                     await db.execute(
                         "UPDATE materials SET quantity = quantity + ? WHERE id = ?",
                         (total_to_restore, requirement['material_id'])
+                    )
+                    await log_material_history_entry(
+                        db,
+                        requirement['material_id'],
+                        total_to_restore,
+                        'Возврат',
+                        deletion_display,
+                        f"Возврат при удалении отчета работы ID {work_id}"
                     )
 
                 # Удаляем отчет
@@ -943,6 +1106,8 @@ async def create_work_report_in_db(report_data: dict):
             try:
                 await db.execute("BEGIN")
 
+                foreman_display = await get_foreman_display_name(db, report_data.get('foreman_id'))
+
                 # Проверяем баланс работы
                 async with db.execute(
                     "SELECT balance FROM works WHERE id = ?",
@@ -986,6 +1151,15 @@ async def create_work_report_in_db(report_data: dict):
                         (total_required, requirement['material_id'])
                     )
 
+                    await log_material_history_entry(
+                        db,
+                        requirement['material_id'],
+                        -total_required,
+                        'Списание',
+                        foreman_display,
+                        f"Списание по отчету работы ID {report_data['work_id']}"
+                    )
+
                 # Создаем отчет
                 await db.execute(
                     '''INSERT INTO work_reports
@@ -1015,7 +1189,7 @@ async def update_work_report_in_db(report_id: int, report_data: dict):
 
                 # Получаем старые данные
                 async with db.execute(
-                    "SELECT work_id, quantity FROM work_reports WHERE id = ?",
+                    "SELECT work_id, quantity, foreman_id FROM work_reports WHERE id = ?",
                     (report_id,)
                 ) as cursor:
                     old_row = await cursor.fetchone()
@@ -1023,7 +1197,11 @@ async def update_work_report_in_db(report_id: int, report_data: dict):
                         await db.rollback()
                         return False, "Отчет не найден"
 
-                    old_work_id, old_quantity = old_row
+                    old_work_id, old_quantity, old_foreman_id = old_row
+
+                new_foreman_display = await get_foreman_display_name(db, report_data.get('foreman_id'))
+                old_foreman_display = await get_foreman_display_name(db, old_foreman_id)
+                correction_display = f"{old_foreman_display} (коррекция отчета ID {report_id})"
 
                 # Восстанавливаем старый баланс работы
                 await db.execute(
@@ -1040,6 +1218,14 @@ async def update_work_report_in_db(report_id: int, report_data: dict):
                     await db.execute(
                         "UPDATE materials SET quantity = quantity + ? WHERE id = ?",
                         (total_to_restore, requirement['material_id'])
+                    )
+                    await log_material_history_entry(
+                        db,
+                        requirement['material_id'],
+                        total_to_restore,
+                        'Возврат',
+                        correction_display,
+                        f"Возврат при редактировании отчета работы ID {old_work_id}"
                     )
 
                 # Проверяем новый баланс работы
@@ -1083,6 +1269,14 @@ async def update_work_report_in_db(report_id: int, report_data: dict):
                     await db.execute(
                         "UPDATE materials SET quantity = quantity - ? WHERE id = ?",
                         (total_required, requirement['material_id'])
+                    )
+                    await log_material_history_entry(
+                        db,
+                        requirement['material_id'],
+                        -total_required,
+                        'Списание',
+                        new_foreman_display,
+                        f"Списание по обновленному отчету работы ID {report_data['work_id']}"
                     )
 
                 # Обновляем отчет
@@ -1135,6 +1329,7 @@ async def startup_event():
     await init_categories_table()
     await init_materials_table()
     await init_work_materials_table()
+    await init_material_history_table()
 
 
 @app.get("/api/works/export")
@@ -1715,6 +1910,10 @@ async def get_materials():
     materials = await get_all_materials_from_db()
     return {"success": True, "data": materials}
 
+@app.get("/api/materials/history")
+async def get_material_history(limit: int = 500):
+    history = await get_material_history_from_db(limit)
+    return {"success": True, "data": history}
 
 @app.get("/api/materials/{material_id}")
 async def get_material(material_id: int):
@@ -1728,6 +1927,8 @@ async def get_material(material_id: int):
 async def create_material(request: Request):
     try:
         material_data = await request.json()
+        performed_by = material_data.pop('performed_by', None)
+        performed_by = material_data.pop('performed_by', None)
 
         required_fields = ["name", "category", "unit", "quantity"]
         for field in required_fields:
@@ -1742,7 +1943,7 @@ async def create_material(request: Request):
         if material_data['quantity'] < 0:
             raise HTTPException(status_code=400, detail="quantity должно быть >= 0")
 
-        material_id = await insert_material_to_db(material_data)
+        material_id = await insert_material_to_db(material_data, performed_by or 'Система')
         created_material = await get_material_by_id(material_id)
         return {"success": True, "message": "Материал успешно добавлен", "data": created_material}
     except HTTPException:
@@ -1773,7 +1974,15 @@ async def add_material_quantity_endpoint(material_id: int, request: Request):
     if amount <= 0:
         raise HTTPException(status_code=400, detail="amount должно быть больше 0")
 
-    new_quantity = await add_quantity_to_material_in_db(material_id, amount)
+    performed_by = payload.get('performed_by')
+    description = payload.get('description')
+
+    new_quantity = await add_quantity_to_material_in_db(
+        material_id,
+        amount,
+        performed_by or 'Система',
+        description
+    )
     if new_quantity is None:
         raise HTTPException(status_code=500, detail="Не удалось обновить количество материала")
 
@@ -1807,7 +2016,7 @@ async def update_material(material_id: int, request: Request):
         if material_data['quantity'] < 0:
             raise HTTPException(status_code=400, detail="quantity должно быть >= 0")
 
-        success = await update_material_in_db(material_id, material_data)
+        success = await update_material_in_db(material_id, material_data, performed_by or 'Система')
         if success:
             updated_material = await get_material_by_id(material_id)
             return {"success": True, "message": "Материал успешно обновлен", "data": updated_material}
