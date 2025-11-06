@@ -2693,7 +2693,7 @@
         if (!Number.isFinite(numberValue)) {
             return amount;
         }
-        const sign = numberValue > 0 ? '+' : '';
+        const sign = numberValue > 0 ? '+' : numberValue < 0 ? '-' : '';
         const formatted = Math.abs(numberValue).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
         return unit ? `${sign}${formatted} ${unit}` : `${sign}${formatted}`;
     }
