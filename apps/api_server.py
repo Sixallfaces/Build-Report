@@ -729,15 +729,14 @@ async def update_material_in_db(material_id: int, material_data: dict, performed
         logger.error(f"⚠️ Ошибка обновления материала ID {material_id}: {e}")
         return False
     
-async def add_quantity_to_material_in_db(material_id: int, amount: float):
-    async def add_quantity_to_material_in_db(
+async def add_quantity_to_material_in_db(
     material_id: int,
     amount: float,
     performed_by: Optional[str] = None,
     description: Optional[str] = None
 ):
         
-     """Увеличивает количество материала на складе"""
+    """Увеличивает количество материала на складе"""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             try:
