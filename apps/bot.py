@@ -281,7 +281,7 @@ async def _log_material_history_entry(
         if row is not None:
             resulting_quantity = row[0]
 
-    await db.execute(
+    cursor = await db.execute(
         '''INSERT INTO material_history
            (material_id, change_type, change_amount, resulting_quantity, performed_by, description, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)''',
@@ -296,8 +296,15 @@ async def _log_material_history_entry(
         ),
     )
 
+    return cursor.lastrowid
 
-async def update_work_balance(work_id: int, quantity_used: float, foreman_id: Optional[int] = None):
+
+async def update_work_balance(
+    work_id: int,
+    quantity_used: float,
+    foreman_id: Optional[int] = None,
+    report_id: Optional[int] = None,
+):
     """Обновляет баланс работы и списывает материалы на складе."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
@@ -349,13 +356,18 @@ async def update_work_balance(work_id: int, quantity_used: float, foreman_id: Op
                         "UPDATE materials SET quantity = quantity - ? WHERE id = ?",
                         (total_required, requirement['material_id'])
                     )
+                    description = (
+                        f"Списание по отчету работы ID {report_id}"
+                        if report_id is not None
+                        else f"Списание по отчету работы ID {work_id}"
+                    )
                     await _log_material_history_entry(
                         db,
                         requirement['material_id'],
                         -total_required,
                         'Списание',
                         performed_by,
-                        f"Списание по отчету работы ID {work_id}",
+                        description,
                     )
 
                 await db.commit()
@@ -372,7 +384,7 @@ async def save_work_report(user_id: int, work_id: int, quantity: float, photo_re
     """Сохраняет отчет о выполненной работе в базе данных."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute(
+            cursor = await db.execute(
                 "INSERT INTO work_reports (foreman_id, work_id, quantity, report_date, report_time, photo_report_url) VALUES (?, ?, ?, ?, ?, ?)",
                 (user_id, work_id, quantity,
                  datetime.now().strftime('%Y-%m-%d'),
@@ -380,12 +392,28 @@ async def save_work_report(user_id: int, work_id: int, quantity: float, photo_re
                  photo_report_url)
             )
             await db.commit()
-            logger.info(f"✅ Отчет сохранен для работы ID: {work_id}")
-            return True
+            report_id = cursor.lastrowid
+            logger.info(f"✅ Отчет сохранен ID: {report_id} для работы ID: {work_id}")
+            return True, report_id
     except Exception as e:
         logger.error(f"⚠️ Ошибка сохранения отчета о работе: {e}")
         logger.error(traceback.format_exc())
-        return False
+        return False, f"⚠️ Ошибка сохранения отчета: {e}"
+
+
+async def delete_work_report(report_id: int):
+    """Удаляет отчет о работе из базы данных."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "DELETE FROM work_reports WHERE id = ?",
+                (report_id,)
+            )
+            await db.commit()
+            logger.info(f"🗑️ Отчет ID: {report_id} удален после ошибки списания")
+    except Exception as e:
+        logger.error(f"⚠️ Ошибка удаления отчета ID {report_id}: {e}")
+        logger.error(traceback.format_exc())
 
 async def get_reports_for_date(target_date: str):
     """Получает отчеты за конкретную дату."""
@@ -1235,50 +1263,70 @@ async def save_report_with_photo(message: types.Message, state: FSMContext, phot
         quantity = data.get('quantity', 0)
         works_list = data.get('works_list', [])
 
-        success, result = await update_work_balance(work_id, quantity, message.from_user.id) # Передаем ID
-        if not success:
-            await message.answer(result, reply_markup=get_main_keyboard(message.from_user.id))
-            await state.set_state(Form.selecting_action)
-            return
-
-        report_success = await save_work_report(
+        report_success, report_result = await save_work_report(
             message.from_user.id,
             work_id, # Передаем ID
             quantity,
             photo_url
         )
 
-        if report_success:
-            # Нужно получить unit заново из БД
-            works = await get_active_works()
-            selected_work = next((w for w in works if w['id'] == work_id), None)
-            unit = selected_work.get('Единица измерения', 'шт') if selected_work else 'шт'
-
-            foreman_info = await get_foreman_info(message.from_user.id)
-            photo_text = " с фотоотчетом" if photo_url else ""
-            works_list.append({'work_name': work_name, 'quantity': quantity, 'unit': unit, 'photo': photo_text})
-            await state.update_data(works_list=works_list)
-            count = len(works_list)
+        if not report_success:
             await message.answer(
-                f"✅ Работа добавлена в отчет{photo_text}!\n"
-                f"👷 Бригадир: {foreman_info['full_name']}\n"
-                f"💼 Должность: {foreman_info.get('position') or '—'}\n"
-                f"🏗 Работа: {work_name}\n" # Используем имя
-                f"📊 Количество: {quantity} {unit}\n"
-                f"💰 Остаток: {result} {unit}\n"
-                f"📅 Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
-                f"📋 В отчете уже {count} шт\n"
-                f"Хотите добавить еще работу в отчет?",
-                reply_markup=get_add_more_keyboard()
+                report_result,
+                reply_markup=get_main_keyboard(message.from_user.id)
             )
-            await state.set_state(Form.adding_more_works)
-        else:
-            await message.answer("❌ Ошибка при сохранении отчета. Попробуйте еще раз.")
+            
             await state.set_state(Form.selecting_action)
+            return
+
+        report_id = report_result
+
+        balance_success, balance_result = await update_work_balance(
+            work_id,
+            quantity,
+            message.from_user.id,
+            report_id
+        )
+
+        if not balance_success:
+            await delete_work_report(report_id)
+            await message.answer(
+                balance_result,
+                reply_markup=get_main_keyboard(message.from_user.id)
+            )
+            await state.set_state(Form.selecting_action)
+            return
+
+        new_balance = balance_result
+
+        # Нужно получить unit заново из БД
+        works = await get_active_works()
+        selected_work = next((w for w in works if w['id'] == work_id), None)
+        unit = selected_work.get('Единица измерения', 'шт') if selected_work else 'шт'
+
+        foreman_info = await get_foreman_info(message.from_user.id)
+        photo_text = " с фотоотчетом" if photo_url else ""
+        works_list.append({'work_name': work_name, 'quantity': quantity, 'unit': unit, 'photo': photo_text})
+        await state.update_data(works_list=works_list)
+        count = len(works_list)
+        await message.answer(
+            f"✅ Работа добавлена в отчет{photo_text}!\n"
+            f"👷 Бригадир: {foreman_info['full_name']}\n"
+            f"💼 Должность: {foreman_info.get('position') or '—'}\n"
+            f"🏗 Работа: {work_name}\n" # Используем имя
+            f"📊 Количество: {quantity} {unit}\n"
+            f"💰 Остаток: {new_balance} {unit}\n"
+            f"📅 Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
+            f"📋 В отчете уже {count} шт\n"
+            f"Хотите добавить еще работу в отчет?",
+            reply_markup=get_add_more_keyboard()
+        )
+        await state.set_state(Form.adding_more_works)
     except Exception as e:
         logger.error(f"❌ Ошибка сохранения отчета: {e}")
         await message.answer("❌ Ошибка при сохранении отчета. Попробуйте еще раз.")
         await state.set_state(Form.selecting_action)
+
 
 @dp.message(Form.adding_more_works)
 async def handle_add_more_works(message: types.Message, state: FSMContext):

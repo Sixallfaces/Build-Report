@@ -1053,7 +1053,7 @@ async def delete_report_from_db(report_id: int):
                         total_to_restore,
                         'Возврат',
                         deletion_display,
-                        f"Возврат при удалении отчета работы ID {work_id}"
+                        f"Возврат при удалении отчета работы ID {report_id}"
                     )
 
                 # Удаляем отчет
@@ -1134,6 +1134,18 @@ async def create_work_report_in_db(report_data: dict):
                             f"Недостаточно материала \"{requirement['material_name']}\" на складе"
                         )
 
+                # Создаем отчет и получаем его ID
+                cursor = await db.execute(
+                    '''INSERT INTO work_reports
+                       (foreman_id, work_id, quantity, report_date, report_time, photo_report_url)
+                       VALUES (?, ?, ?, ?, ?, ?)''',
+                    (report_data['foreman_id'], report_data['work_id'], report_data['quantity'],
+                     report_data['report_date'], report_data['report_time'],
+                     report_data.get('photo_report_url', ''))
+                )
+                report_id = cursor.lastrowid
+
+
                 # Вычитаем из баланса работы
                 await db.execute(
                     "UPDATE works SET balance = balance - ? WHERE id = ?",
@@ -1156,20 +1168,11 @@ async def create_work_report_in_db(report_data: dict):
                         -total_required,
                         'Списание',
                         foreman_display,
-                        f"Списание по отчету работы ID {report_data['work_id']}"
+                        f"Списание по отчету работы ID {report_id}"
                     )
 
-                # Создаем отчет
-                await db.execute(
-                    '''INSERT INTO work_reports
-                       (foreman_id, work_id, quantity, report_date, report_time, photo_report_url)
-                       VALUES (?, ?, ?, ?, ?, ?)''',
-                    (report_data['foreman_id'], report_data['work_id'], report_data['quantity'],
-                     report_data['report_date'], report_data['report_time'],
-                     report_data.get('photo_report_url', ''))
-                )
+                
                 await db.commit()
-                report_id = db.last_insert_rowid()
                 logger.info(f"📊 Создан отчет ID: {report_id}")
                 return True, report_id
             except Exception as e:
@@ -1224,7 +1227,7 @@ async def update_work_report_in_db(report_id: int, report_data: dict):
                         total_to_restore,
                         'Возврат',
                         correction_display,
-                        f"Возврат при редактировании отчета работы ID {old_work_id}"
+                        f"Возврат при редактировании отчета работы ID {report_id}"
                     )
 
                 # Проверяем новый баланс работы
@@ -1275,7 +1278,7 @@ async def update_work_report_in_db(report_id: int, report_data: dict):
                         -total_required,
                         'Списание',
                         new_foreman_display,
-                        f"Списание по обновленному отчету работы ID {report_data['work_id']}"
+                        f"Списание по обновленному отчету работы ID {report_id}"
                     )
 
                 # Обновляем отчет
