@@ -2484,12 +2484,80 @@ async def create_work_report(request: Request):
     try:
         report_data = await request.json()
         
-        # Валидация
+        # Поддержка отправки нескольких работ за один раз
+        if isinstance(report_data, dict) and isinstance(report_data.get('works'), list):
+            base_required = ["foreman_id", "report_date", "report_time"]
+            for field in base_required:
+                if field not in report_data:
+                    raise HTTPException(status_code=400, detail=f"Отсутствует поле: {field}")
+
+            works_list = [item for item in report_data.get('works', []) if item is not None]
+            if not works_list:
+                raise HTTPException(status_code=400, detail="Добавьте хотя бы одну работу в отчет")
+
+            created_ids: List[int] = []
+            for work_item in works_list:
+                if not isinstance(work_item, dict):
+                    raise HTTPException(status_code=400, detail="Неверный формат данных работы")
+
+                for field in ["work_id", "quantity"]:
+                    if field not in work_item:
+                        raise HTTPException(status_code=400, detail=f"Отсутствует поле: {field}")
+
+                work_id = work_item["work_id"]
+                quantity = work_item["quantity"]
+
+                if not isinstance(work_id, int) or work_id <= 0:
+                    raise HTTPException(status_code=400, detail="work_id должно быть положительным целым числом")
+
+                try:
+                    quantity_value = float(quantity)
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail="quantity должно быть числом")
+
+                if quantity_value <= 0:
+                    raise HTTPException(status_code=400, detail="quantity должно быть больше 0")
+
+                payload = {
+                    "foreman_id": report_data["foreman_id"],
+                    "work_id": work_id,
+                    "quantity": quantity_value,
+                    "report_date": report_data["report_date"],
+                    "report_time": report_data["report_time"],
+                }
+
+                if "photo_report_url" in report_data:
+                    payload["photo_report_url"] = report_data["photo_report_url"]
+
+                success, result = await create_work_report_in_db(payload)
+                if not success:
+                    raise HTTPException(status_code=400, detail=result)
+
+                created_ids.append(result)
+
+            return {
+                "success": True,
+                "message": "Отчет успешно создан",
+                "data": {"ids": created_ids},
+            }
+
+        # Обработка одиночного отчета (для обратной совместимости)
         required_fields = ["foreman_id", "work_id", "quantity", "report_date", "report_time"]
         for field in required_fields:
             if field not in report_data:
                 raise HTTPException(status_code=400, detail=f"Отсутствует поле: {field}")
         
+        try:
+            quantity_value = float(report_data["quantity"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="quantity должно быть числом")
+
+        if quantity_value <= 0:
+            raise HTTPException(status_code=400, detail="quantity должно быть больше 0")
+
+        report_data["quantity"] = quantity_value
+
+
         success, result = await create_work_report_in_db(report_data)
         if success:
             return {"success": True, "message": "Отчет успешно создан", "data": {"id": result}}
@@ -2497,6 +2565,8 @@ async def create_work_report(request: Request):
             raise HTTPException(status_code=400, detail=result)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Неверный формат JSON")
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as e:
         logger.error(f"❌ Ошибка при создании отчета: {e}")
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
@@ -2520,6 +2590,8 @@ async def update_work_report(report_id: int, request: Request):
             raise HTTPException(status_code=400, detail=message)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Неверный формат JSON")
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as e:
         logger.error(f"❌ Ошибка при обновлении отчета: {e}")
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
