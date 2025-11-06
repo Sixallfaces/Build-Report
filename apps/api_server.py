@@ -2333,7 +2333,62 @@ async def update_report(report_id: int, request: Request):
     try:
         report_data = await request.json()
         
-        # Валидация данных
+        if isinstance(report_data, dict) and isinstance(report_data.get('works'), list):
+            base_required = ["foreman_id", "report_date", "report_time"]
+            for field in base_required:
+                if field not in report_data:
+                    raise HTTPException(status_code=400, detail=f"Отсутствует поле: {field}")
+
+            works_list = [item for item in report_data.get('works', []) if item is not None]
+            if not works_list:
+                raise HTTPException(status_code=400, detail="Добавьте хотя бы одну работу в отчет")
+
+            created_ids = []
+            for work_item in works_list:
+                if not isinstance(work_item, dict):
+                    raise HTTPException(status_code=400, detail="Неверный формат данных работы")
+
+                for key in ("work_id", "quantity"):
+                    if key not in work_item:
+                        raise HTTPException(status_code=400, detail="Каждая работа должна содержать идентификатор и количество")
+
+                try:
+                    work_id_value = int(work_item["work_id"])
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail="Некорректный идентификатор работы")
+
+                try:
+                    quantity_value = float(work_item["quantity"])
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail="Некорректное количество выполненной работы")
+
+                if quantity_value <= 0:
+                    raise HTTPException(status_code=400, detail="Количество выполненной работы должно быть больше нуля")
+
+                payload = {
+                    "foreman_id": report_data["foreman_id"],
+                    "work_id": work_id_value,
+                    "quantity": quantity_value,
+                    "report_date": report_data["report_date"],
+                    "report_time": report_data["report_time"],
+                }
+
+                if "photo_report_url" in report_data:
+                    payload["photo_report_url"] = report_data["photo_report_url"]
+
+                success, result = await create_work_report_in_db(payload)
+                if not success:
+                    raise HTTPException(status_code=400, detail=result)
+
+                created_ids.append(result)
+
+            return {
+                "success": True,
+                "message": f"Создано {len(created_ids)} отчетов" if len(created_ids) > 1 else "Отчет успешно создан",
+                "data": {"ids": created_ids}
+            }
+
+        # Валидация для одиночного формата
         required_fields = ["work_id", "quantity", "report_date", "report_time"]
         for field in required_fields:
             if field not in report_data:

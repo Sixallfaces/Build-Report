@@ -620,6 +620,27 @@
             font-weight: 600;
         }
 
+        #reportWorksContainer {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .report-work-item {
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid var(--secondary);
+            background: rgba(30, 47, 64, 0.6);
+        }
+
+        .report-work-item .modal-note {
+            margin-bottom: 10px;
+        }
+
+        .report-work-item .remove-report-work-button {
+            margin-top: 10px;
+        }
+
         .modal-alert {
             display: none;
             padding: 12px 14px;
@@ -967,19 +988,9 @@
                 </div>
 
                 <div class="modal-form-group">
-                    <label for="reportWorkSelect">Работа</label>
-                    <select id="reportWorkSelect" required>
-                        <option value="">Выберите работу</option>
-                    </select>
-                    <p id="reportWorkDetails" class="modal-note">Выберите работу, чтобы увидеть доступный баланс и единицу измерения.</p>
-                </div>
-
-                <div class="modal-form-group">
-                    <label for="reportQuantity">Количество</label>
-                    <div class="quantity-input-wrapper">
-                        <input type="number" id="reportQuantity" min="0" step="0.01" placeholder="Количество" required>
-                        <span id="reportQuantityUnit"></span>
-                    </div>
+                    <label for="reportWorksContainer">Работы</label>
+                    <div id="reportWorksContainer"></div>
+                    <button type="button" id="addReportWorkButton" class="secondary">➕ Добавить работу</button>
                 </div>
 
                 <div class="modal-form-group">
@@ -1320,6 +1331,7 @@
 
     // Переменные состояния
     let works = [];
+    let availableReportWorks = [];
     let materials = [];
     let foremen = [];
     let reports = [];
@@ -1681,9 +1693,9 @@
             form.addEventListener('submit', submitSendReport);
         }
 
-        const workSelect = document.getElementById('reportWorkSelect');
-        if (workSelect) {
-            workSelect.addEventListener('change', updateReportWorkDetails);
+        const addWorkButton = document.getElementById('addReportWorkButton');
+        if (addWorkButton) {
+            addWorkButton.addEventListener('click', () => addReportWorkItem());
         }
     }
 
@@ -1709,7 +1721,6 @@
 
         const availability = populateSendReportOptions();
         resetSendReportForm();
-        updateReportWorkDetails();
         updateSendReportAvailabilityMessage(availability);
 
         const submitButton = document.getElementById('submitReportButton');
@@ -1727,6 +1738,161 @@
         }
     }
 
+    function updateReportWorkSelectOptions(selectElement, selectedValue) {
+        if (!selectElement) return;
+
+        const currentValue = selectedValue !== undefined ? selectedValue : selectElement.value;
+        const options = ['<option value="">Выберите работу</option>'];
+
+        availableReportWorks.forEach(item => {
+            const category = item['Категория'] ? ` — ${item['Категория']}` : '';
+            options.push(`<option value="${item.id}">${item['Название работы'] || item.id}${category}</option>`);
+        });
+
+        selectElement.innerHTML = options.join('');
+
+        if (currentValue) {
+            selectElement.value = String(currentValue);
+            if (selectElement.value !== String(currentValue)) {
+                selectElement.value = '';
+            }
+        }
+
+        selectElement.disabled = availableReportWorks.length === 0;
+    }
+
+    function updateReportWorkItemDetails(itemElement) {
+        if (!itemElement) return;
+
+        const selectElement = itemElement.querySelector('.report-work-select');
+        const detailsElement = itemElement.querySelector('.report-work-details');
+        const unitElement = itemElement.querySelector('.report-work-unit');
+        const quantityInput = itemElement.querySelector('.report-work-quantity');
+
+        const workId = selectElement ? parseInt(selectElement.value, 10) : NaN;
+        if (!Number.isInteger(workId)) {
+            if (detailsElement) {
+                detailsElement.textContent = 'Выберите работу, чтобы увидеть доступный баланс и единицу измерения.';
+            }
+            if (unitElement) {
+                unitElement.textContent = '';
+            }
+            if (quantityInput) {
+                quantityInput.placeholder = 'Количество';
+            }
+            return;
+        }
+
+        const work = Array.isArray(works) ? works.find(item => item && item.id === workId) : null;
+        if (!work) {
+            if (detailsElement) {
+                detailsElement.textContent = 'Не удалось найти данные о выбранной работе.';
+            }
+            if (unitElement) {
+                unitElement.textContent = '';
+            }
+            if (quantityInput) {
+                quantityInput.placeholder = 'Количество';
+            }
+            return;
+        }
+
+        const unit = work['Единица измерения'] || 'шт';
+        const balanceRaw = work['На балансе'];
+        const balanceNumber = typeof balanceRaw === 'number' ? balanceRaw : parseFloat(balanceRaw) || 0;
+        const formattedBalance = Number.isFinite(balanceNumber)
+            ? balanceNumber.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+            : balanceRaw;
+        const category = work['Категория'] || '—';
+
+        if (detailsElement) {
+            detailsElement.textContent = `Раздел: ${category} • На балансе: ${formattedBalance} ${unit}`;
+        }
+
+        if (unitElement) {
+            unitElement.textContent = unit;
+        }
+
+        if (quantityInput) {
+            quantityInput.placeholder = `Количество (${unit})`;
+        }
+    }
+
+    function updateRemoveReportWorkButtonsState() {
+        const container = document.getElementById('reportWorksContainer');
+        if (!container) return;
+
+        const items = Array.from(container.querySelectorAll('.report-work-item'));
+        const shouldDisable = items.length <= 1;
+
+        items.forEach(item => {
+            const button = item.querySelector('.remove-report-work-button');
+            if (button) {
+                button.disabled = shouldDisable;
+                button.style.display = shouldDisable ? 'none' : '';
+            }
+        });
+    }
+
+    function removeReportWorkItem(itemElement) {
+        const container = document.getElementById('reportWorksContainer');
+        if (!container || !itemElement) return;
+
+        container.removeChild(itemElement);
+        updateRemoveReportWorkButtonsState();
+    }
+
+    function addReportWorkItem(selectedWorkId) {
+        const container = document.getElementById('reportWorksContainer');
+        if (!container) return;
+
+        const itemElement = document.createElement('div');
+        itemElement.className = 'report-work-item';
+
+        const selectElement = document.createElement('select');
+        selectElement.className = 'report-work-select';
+        selectElement.required = true;
+        updateReportWorkSelectOptions(selectElement, selectedWorkId);
+        selectElement.addEventListener('change', () => updateReportWorkItemDetails(itemElement));
+
+        const quantityWrapper = document.createElement('div');
+        quantityWrapper.className = 'quantity-input-wrapper';
+
+        const quantityInput = document.createElement('input');
+        quantityInput.type = 'number';
+        quantityInput.min = '0';
+        quantityInput.step = '0.01';
+        quantityInput.placeholder = 'Количество';
+        quantityInput.required = true;
+        quantityInput.className = 'report-work-quantity';
+
+        const unitElement = document.createElement('span');
+        unitElement.className = 'report-work-unit';
+
+        quantityWrapper.appendChild(quantityInput);
+        quantityWrapper.appendChild(unitElement);
+
+        const detailsElement = document.createElement('p');
+        detailsElement.className = 'modal-note report-work-details';
+        detailsElement.textContent = 'Выберите работу, чтобы увидеть доступный баланс и единицу измерения.';
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'secondary remove-report-work-button';
+        removeButton.textContent = 'Удалить';
+        removeButton.addEventListener('click', () => removeReportWorkItem(itemElement));
+
+        itemElement.appendChild(selectElement);
+        itemElement.appendChild(quantityWrapper);
+        itemElement.appendChild(detailsElement);
+        itemElement.appendChild(removeButton);
+
+        container.appendChild(itemElement);
+
+        updateReportWorkItemDetails(itemElement);
+        updateRemoveReportWorkButtonsState();
+    }
+
     function resetSendReportForm() {
         const form = document.getElementById('sendReportForm');
         if (form) {
@@ -1736,8 +1902,6 @@
         const now = new Date();
         const dateInput = document.getElementById('reportDate');
         const timeInput = document.getElementById('reportTime');
-        const quantityUnit = document.getElementById('reportQuantityUnit');
-        const workDetails = document.getElementById('reportWorkDetails');
 
         if (dateInput) {
             dateInput.value = now.toISOString().slice(0, 10);
@@ -1747,18 +1911,22 @@
             timeInput.value = now.toTimeString().slice(0, 8);
         }
 
-        if (quantityUnit) {
-            quantityUnit.textContent = '';
+        const container = document.getElementById('reportWorksContainer');
+        if (container) {
+            container.innerHTML = '';
+            addReportWorkItem();
         }
 
-        if (workDetails) {
-            workDetails.textContent = 'Выберите работу, чтобы увидеть доступный баланс и единицу измерения.';
+        const addButton = document.getElementById('addReportWorkButton');
+        if (addButton) {
+            addButton.disabled = availableReportWorks.length === 0;
         }
+
+        updateRemoveReportWorkButtonsState();
     }
 
     function populateSendReportOptions() {
         const foremanSelect = document.getElementById('reportForemanSelect');
-        const workSelect = document.getElementById('reportWorkSelect');
 
         let hasForemen = false;
         let hasWorks = false;
@@ -1786,27 +1954,27 @@
             }
         }
 
-        if (workSelect) {
-            const availableWorks = (Array.isArray(works) ? works : [])
-                .filter(item => item && (item.is_active === undefined ? true : Boolean(item.is_active)));
+        availableReportWorks = (Array.isArray(works) ? works : [])
+            .filter(item => item && (item.is_active === undefined ? true : Boolean(item.is_active)))
+            .slice()
+            .sort((a, b) => (a['Название работы'] || '').localeCompare(b['Название работы'] || ''));
 
-            if (availableWorks.length > 0) {
-                const options = ['<option value="">Выберите работу</option>'].concat(
-                    availableWorks
-                        .slice()
-                        .sort((a, b) => (a['Название работы'] || '').localeCompare(b['Название работы'] || ''))
-                        .map(item => {
-                            const category = item['Категория'] ? ` — ${item['Категория']}` : '';
-                            return `<option value="${item.id}">${item['Название работы'] || item.id}${category}</option>`;
-                        })
-                );
-                workSelect.innerHTML = options.join('');
-                workSelect.disabled = false;
-                hasWorks = true;
-            } else {
-                workSelect.innerHTML = '<option value="">Нет доступных работ</option>';
-                workSelect.disabled = true;
-            }
+        hasWorks = availableReportWorks.length > 0;
+
+        const container = document.getElementById('reportWorksContainer');
+        if (container) {
+            container.querySelectorAll('.report-work-select').forEach(select => {
+                updateReportWorkSelectOptions(select);
+                const itemElement = select.closest('.report-work-item');
+                if (itemElement) {
+                    updateReportWorkItemDetails(itemElement);
+                }
+            });
+        }
+
+        const addButton = document.getElementById('addReportWorkButton');
+        if (addButton) {
+            addButton.disabled = !hasWorks;
         }
 
         return { hasForemen, hasWorks };
@@ -1838,66 +2006,13 @@
         messageElement.style.display = 'none';
     }
 
-    function updateReportWorkDetails() {
-        const workSelect = document.getElementById('reportWorkSelect');
-        const detailsElement = document.getElementById('reportWorkDetails');
-        const unitElement = document.getElementById('reportQuantityUnit');
-
-        if (!workSelect) return;
-
-        const workId = parseInt(workSelect.value, 10);
-        if (!workId) {
-            if (detailsElement) {
-                detailsElement.textContent = 'Выберите работу, чтобы увидеть доступный баланс и единицу измерения.';
-            }
-            if (unitElement) {
-                unitElement.textContent = '';
-            }
-            return;
-        }
-
-        const work = Array.isArray(works) ? works.find(item => item.id === workId) : null;
-
-        if (!work) {
-            if (detailsElement) {
-                detailsElement.textContent = 'Не удалось найти данные о выбранной работе.';
-            }
-            if (unitElement) {
-                unitElement.textContent = '';
-            }
-            return;
-        }
-
-        const unit = work['Единица измерения'] || 'шт';
-        const balanceRaw = work['На балансе'];
-        const balanceNumber = typeof balanceRaw === 'number' ? balanceRaw : parseFloat(balanceRaw) || 0;
-        const formattedBalance = Number.isFinite(balanceNumber)
-            ? balanceNumber.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
-            : balanceRaw;
-        const category = work['Категория'] || '—';
-
-        if (detailsElement) {
-            detailsElement.textContent = `Раздел: ${category} • На балансе: ${formattedBalance} ${unit}`;
-        }
-
-        if (unitElement) {
-            unitElement.textContent = unit;
-        }
-
-        const quantityInput = document.getElementById('reportQuantity');
-        if (quantityInput) {
-            quantityInput.placeholder = `Количество (${unit})`;
-        }
-    }
-
     async function submitSendReport(event) {
         event.preventDefault();
 
         const foremanSelect = document.getElementById('reportForemanSelect');
-        const workSelect = document.getElementById('reportWorkSelect');
-        const quantityInput = document.getElementById('reportQuantity');
         const dateInput = document.getElementById('reportDate');
         const timeInput = document.getElementById('reportTime');
+        const container = document.getElementById('reportWorksContainer');
         const submitButton = document.getElementById('submitReportButton');
 
         if (submitButton) {
@@ -1906,21 +2021,9 @@
 
         try {
             const foremanIdValue = foremanSelect ? parseInt(foremanSelect.value, 10) : NaN;
-            const workIdValue = workSelect ? parseInt(workSelect.value, 10) : NaN;
-            const quantityValue = quantityInput ? parseFloat(String(quantityInput.value).replace(',', '.')) : NaN;
 
             if (!Number.isInteger(foremanIdValue)) {
                 showNotification('Выберите бригадира для отчета', 'error');
-                return;
-            }
-
-            if (!Number.isInteger(workIdValue)) {
-                showNotification('Выберите работу для отчета', 'error');
-                return;
-            }
-
-            if (!Number.isFinite(quantityValue) || quantityValue <= 0) {
-                showNotification('Введите количество выполненной работы', 'error');
                 return;
             }
 
@@ -1931,12 +2034,51 @@
                 reportTime += ':00';
             }
 
+            const workItems = container ? Array.from(container.querySelectorAll('.report-work-item')) : [];
+            if (workItems.length === 0) {
+                showNotification('Добавьте хотя бы одну работу для отчета', 'error');
+                return;
+            }
+
+            const worksPayload = [];
+            const usedWorkIds = new Set();
+
+            for (const item of workItems) {
+                const selectElement = item.querySelector('.report-work-select');
+                const quantityInput = item.querySelector('.report-work-quantity');
+
+                const workIdValue = selectElement ? parseInt(selectElement.value, 10) : NaN;
+                const quantityValue = quantityInput ? parseFloat(String(quantityInput.value).replace(',', '.')) : NaN;
+
+                if (!Number.isInteger(workIdValue)) {
+                    showNotification('Выберите работу для каждого отчета', 'error');
+                    return;
+                }
+
+                if (usedWorkIds.has(workIdValue)) {
+                    showNotification('Каждая работа должна быть выбрана только один раз', 'error');
+                    return;
+                }
+
+                if (!Number.isFinite(quantityValue) || quantityValue <= 0) {
+                    showNotification('Введите количество выполненной работы для каждой выбранной позиции', 'error');
+                    return;
+                }
+
+                usedWorkIds.add(workIdValue);
+                worksPayload.push({ work_id: workIdValue, quantity: quantityValue });
+            }
+
+            if (worksPayload.length === 0) {
+                showNotification('Добавьте хотя бы одну работу для отчета', 'error');
+                return;
+            }
+
             const payload = {
                 foreman_id: foremanIdValue,
-                work_id: workIdValue,
-                quantity: quantityValue,
                 report_date: reportDate,
-                report_time: reportTime
+                report_time: reportTime,
+                works: worksPayload
             };
 
             const response = await makeApiRequest(API_CONFIG.ENDPOINTS.WORK_REPORTS, {
