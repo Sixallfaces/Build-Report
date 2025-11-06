@@ -191,9 +191,23 @@
             color: var(--dark);
             font-weight: 700;
         }
-        
+
         .tab:hover:not(.active) {
             background: rgba(84, 176, 165, 0.3);
+        }
+
+        .send-report-button {
+            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+            color: white;
+            border-radius: 8px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            box-shadow: 0 4px 12px rgba(46, 204, 113, 0.3);
+        }
+
+        .send-report-button:hover {
+            background: linear-gradient(135deg, #29b765 0%, #1f8f4c 100%);
+            transform: translateY(-2px);
         }
         
         /* Контент вкладок */
@@ -571,6 +585,52 @@
             font-size: 0.95rem;
         }
 
+        .modal-form-group {
+            margin-bottom: 15px;
+        }
+
+        .modal-form-group label {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .modal-form-group select,
+        .modal-form-group input {
+            width: 100%;
+        }
+
+        .modal-note {
+            margin-top: 5px;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.85rem;
+        }
+
+        .quantity-input-wrapper {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .quantity-input-wrapper span {
+            min-width: 60px;
+            text-align: right;
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .modal-alert {
+            display: none;
+            padding: 12px 14px;
+            border-radius: 6px;
+            border: 1px solid #e74c3c;
+            background: rgba(231, 76, 60, 0.15);
+            color: #ffb3a7;
+            font-size: 0.9rem;
+            margin-bottom: 15px;
+        }
+
         .work-materials-modal .modal-content {
             max-width: 720px;
         }
@@ -891,6 +951,61 @@
         </div>
     </div>
 
+    <div id="sendReportModal" class="modal">
+        <div class="modal-content">
+            <h3 class="modal-title">Отправить отчет</h3>
+            <p class="modal-subtitle">Создайте отчет о выполненной работе и сохраните его в базе</p>
+
+            <form id="sendReportForm">
+                <div id="sendReportAvailabilityMessage" class="modal-alert"></div>
+
+                <div class="modal-form-group">
+                    <label for="reportForemanSelect">Бригадир</label>
+                    <select id="reportForemanSelect" required>
+                        <option value="">Выберите бригадира</option>
+                    </select>
+                </div>
+
+                <div class="modal-form-group">
+                    <label for="reportWorkSelect">Работа</label>
+                    <select id="reportWorkSelect" required>
+                        <option value="">Выберите работу</option>
+                    </select>
+                    <p id="reportWorkDetails" class="modal-note">Выберите работу, чтобы увидеть доступный баланс и единицу измерения.</p>
+                </div>
+
+                <div class="modal-form-group">
+                    <label for="reportQuantity">Количество</label>
+                    <div class="quantity-input-wrapper">
+                        <input type="number" id="reportQuantity" min="0" step="0.01" placeholder="Количество" required>
+                        <span id="reportQuantityUnit"></span>
+                    </div>
+                </div>
+
+                <div class="modal-form-group">
+                    <label for="reportDate">Дата отчета</label>
+                    <input type="date" id="reportDate" required>
+                </div>
+
+                <div class="modal-form-group">
+                    <label for="reportTime">Время отчета</label>
+                    <input type="time" id="reportTime" step="1" required>
+                </div>
+
+                <div class="modal-form-group">
+                    <label for="reportPhotoUrl">Ссылка на фото (необязательно)</label>
+                    <input type="url" id="reportPhotoUrl" placeholder="https://...">
+                    <p class="modal-note">Вы можете добавить ссылку на фотоотчет из облака. Если поле оставить пустым, отчет сохранится без фото.</p>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" onclick="closeSendReportModal()" class="secondary">Отмена</button>
+                    <button type="submit" id="submitReportButton" class="success">📨 Отправить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- ОСНОВНОЙ КОНТЕНТ (скрыт до авторизации) -->
     <div id="mainContent" style="display: none;">
         <div class="container">
@@ -900,6 +1015,7 @@
                 <button class="tab active" data-tab="works">🏗️ Работы и материалы</button>
                 <button class="tab" data-tab="materials">📦 Склад</button>
                 <button class="tab" data-tab="foremen">👷 Бригадиры</button>
+                <button type="button" id="openSendReportModal" class="send-report-button">📨 Отправить отчет</button>
                 <button class="tab" data-tab="accumulative">📦 Накопительная ведомость</button>
                 <button class="tab" data-tab="all-reports">📋 Все отчеты</button>
             </div>
@@ -1444,6 +1560,7 @@
         initializeForemenTab();
         initializeReportsTab();
         initializeAllReportsTab();
+        initializeSendReportFeature();
         initializeAccumulativeTab();
 
         // Загрузка данных
@@ -1539,15 +1656,325 @@
         document.getElementById('saveAllReports').addEventListener('click', saveAllReports);
         document.getElementById('searchReports').addEventListener('input', filterReports);
     }
-    
+
     // Инициализация вкладки всех отчетов
     function initializeAllReportsTab() {
         document.getElementById('refreshAllReports').addEventListener('click', loadAllReports);
         document.getElementById('searchAllReports').addEventListener('input', filterAllReports);
     }
-    
+
+    function initializeSendReportFeature() {
+        const openButton = document.getElementById('openSendReportModal');
+        if (openButton) {
+            openButton.addEventListener('click', () => {
+                openSendReportModal();
+            });
+        }
+
+        const modal = document.getElementById('sendReportModal');
+        if (modal) {
+            modal.addEventListener('click', event => {
+                if (event.target === modal) {
+                    closeSendReportModal();
+                }
+            });
+        }
+
+        const form = document.getElementById('sendReportForm');
+        if (form) {
+            form.addEventListener('submit', submitSendReport);
+        }
+
+        const workSelect = document.getElementById('reportWorkSelect');
+        if (workSelect) {
+            workSelect.addEventListener('change', updateReportWorkDetails);
+        }
+    }
+
+    async function openSendReportModal() {
+        const modal = document.getElementById('sendReportModal');
+        if (!modal) return;
+
+        try {
+            if (!Array.isArray(foremen) || foremen.length === 0) {
+                await loadForemen();
+            }
+        } catch (error) {
+            console.error('Не удалось обновить список бригадиров перед отправкой отчета:', error);
+        }
+
+        try {
+            if (!Array.isArray(works) || works.length === 0) {
+                await loadWorks();
+            }
+        } catch (error) {
+            console.error('Не удалось обновить список работ перед отправкой отчета:', error);
+        }
+
+        const availability = populateSendReportOptions();
+        resetSendReportForm();
+        updateReportWorkDetails();
+        updateSendReportAvailabilityMessage(availability);
+
+        const submitButton = document.getElementById('submitReportButton');
+        if (submitButton) {
+            submitButton.disabled = !(availability.hasForemen && availability.hasWorks);
+        }
+
+        modal.style.display = 'flex';
+    }
+
+    function closeSendReportModal() {
+        const modal = document.getElementById('sendReportModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    function resetSendReportForm() {
+        const form = document.getElementById('sendReportForm');
+        if (form) {
+            form.reset();
+        }
+
+        const now = new Date();
+        const dateInput = document.getElementById('reportDate');
+        const timeInput = document.getElementById('reportTime');
+        const quantityUnit = document.getElementById('reportQuantityUnit');
+        const workDetails = document.getElementById('reportWorkDetails');
+
+        if (dateInput) {
+            dateInput.value = now.toISOString().slice(0, 10);
+        }
+
+        if (timeInput) {
+            timeInput.value = now.toTimeString().slice(0, 8);
+        }
+
+        if (quantityUnit) {
+            quantityUnit.textContent = '';
+        }
+
+        if (workDetails) {
+            workDetails.textContent = 'Выберите работу, чтобы увидеть доступный баланс и единицу измерения.';
+        }
+    }
+
+    function populateSendReportOptions() {
+        const foremanSelect = document.getElementById('reportForemanSelect');
+        const workSelect = document.getElementById('reportWorkSelect');
+
+        let hasForemen = false;
+        let hasWorks = false;
+
+        if (foremanSelect) {
+            const availableForemen = (Array.isArray(foremen) ? foremen : [])
+                .filter(item => item && (item.is_active === undefined || item.is_active));
+
+            if (availableForemen.length > 0) {
+                const options = ['<option value="">Выберите бригадира</option>'].concat(
+                    availableForemen
+                        .slice()
+                        .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
+                        .map(item => {
+                            const position = item.position ? ` • ${item.position}` : '';
+                            return `<option value="${item.id}">${item.full_name || item.id}${position}</option>`;
+                        })
+                );
+                foremanSelect.innerHTML = options.join('');
+                foremanSelect.disabled = false;
+                hasForemen = true;
+            } else {
+                foremanSelect.innerHTML = '<option value="">Нет доступных бригадиров</option>';
+                foremanSelect.disabled = true;
+            }
+        }
+
+        if (workSelect) {
+            const availableWorks = (Array.isArray(works) ? works : [])
+                .filter(item => item && (item.is_active === undefined ? true : Boolean(item.is_active)));
+
+            if (availableWorks.length > 0) {
+                const options = ['<option value="">Выберите работу</option>'].concat(
+                    availableWorks
+                        .slice()
+                        .sort((a, b) => (a['Название работы'] || '').localeCompare(b['Название работы'] || ''))
+                        .map(item => {
+                            const category = item['Категория'] ? ` — ${item['Категория']}` : '';
+                            return `<option value="${item.id}">${item['Название работы'] || item.id}${category}</option>`;
+                        })
+                );
+                workSelect.innerHTML = options.join('');
+                workSelect.disabled = false;
+                hasWorks = true;
+            } else {
+                workSelect.innerHTML = '<option value="">Нет доступных работ</option>';
+                workSelect.disabled = true;
+            }
+        }
+
+        return { hasForemen, hasWorks };
+    }
+
+    function updateSendReportAvailabilityMessage(availability) {
+        const messageElement = document.getElementById('sendReportAvailabilityMessage');
+        if (!messageElement) return;
+
+        if (!availability.hasForemen && !availability.hasWorks) {
+            messageElement.textContent = 'Нет активных бригадиров и работ. Добавьте данные в соответствующих разделах, чтобы отправить отчет.';
+            messageElement.style.display = 'block';
+            return;
+        }
+
+        if (!availability.hasForemen) {
+            messageElement.textContent = 'Нет доступных активных бригадиров. Добавьте или разблокируйте бригадира в разделе «Бригадиры».';
+            messageElement.style.display = 'block';
+            return;
+        }
+
+        if (!availability.hasWorks) {
+            messageElement.textContent = 'Нет доступных активных работ. Добавьте работу или включите существующую в разделе «Работы и материалы».';
+            messageElement.style.display = 'block';
+            return;
+        }
+
+        messageElement.textContent = '';
+        messageElement.style.display = 'none';
+    }
+
+    function updateReportWorkDetails() {
+        const workSelect = document.getElementById('reportWorkSelect');
+        const detailsElement = document.getElementById('reportWorkDetails');
+        const unitElement = document.getElementById('reportQuantityUnit');
+
+        if (!workSelect) return;
+
+        const workId = parseInt(workSelect.value, 10);
+        if (!workId) {
+            if (detailsElement) {
+                detailsElement.textContent = 'Выберите работу, чтобы увидеть доступный баланс и единицу измерения.';
+            }
+            if (unitElement) {
+                unitElement.textContent = '';
+            }
+            return;
+        }
+
+        const work = Array.isArray(works) ? works.find(item => item.id === workId) : null;
+
+        if (!work) {
+            if (detailsElement) {
+                detailsElement.textContent = 'Не удалось найти данные о выбранной работе.';
+            }
+            if (unitElement) {
+                unitElement.textContent = '';
+            }
+            return;
+        }
+
+        const unit = work['Единица измерения'] || 'шт';
+        const balanceRaw = work['На балансе'];
+        const balanceNumber = typeof balanceRaw === 'number' ? balanceRaw : parseFloat(balanceRaw) || 0;
+        const formattedBalance = Number.isFinite(balanceNumber)
+            ? balanceNumber.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+            : balanceRaw;
+        const category = work['Категория'] || '—';
+
+        if (detailsElement) {
+            detailsElement.textContent = `Раздел: ${category} • На балансе: ${formattedBalance} ${unit}`;
+        }
+
+        if (unitElement) {
+            unitElement.textContent = unit;
+        }
+
+        const quantityInput = document.getElementById('reportQuantity');
+        if (quantityInput) {
+            quantityInput.placeholder = `Количество (${unit})`;
+        }
+    }
+
+    async function submitSendReport(event) {
+        event.preventDefault();
+
+        const foremanSelect = document.getElementById('reportForemanSelect');
+        const workSelect = document.getElementById('reportWorkSelect');
+        const quantityInput = document.getElementById('reportQuantity');
+        const dateInput = document.getElementById('reportDate');
+        const timeInput = document.getElementById('reportTime');
+        const photoInput = document.getElementById('reportPhotoUrl');
+        const submitButton = document.getElementById('submitReportButton');
+
+        if (submitButton) {
+            submitButton.disabled = true;
+        }
+
+        try {
+            const foremanIdValue = foremanSelect ? parseInt(foremanSelect.value, 10) : NaN;
+            const workIdValue = workSelect ? parseInt(workSelect.value, 10) : NaN;
+            const quantityValue = quantityInput ? parseFloat(String(quantityInput.value).replace(',', '.')) : NaN;
+
+            if (!Number.isInteger(foremanIdValue)) {
+                showNotification('Выберите бригадира для отчета', 'error');
+                return;
+            }
+
+            if (!Number.isInteger(workIdValue)) {
+                showNotification('Выберите работу для отчета', 'error');
+                return;
+            }
+
+            if (!Number.isFinite(quantityValue) || quantityValue <= 0) {
+                showNotification('Введите количество выполненной работы', 'error');
+                return;
+            }
+
+            const now = new Date();
+            const reportDate = (dateInput && dateInput.value) ? dateInput.value : now.toISOString().slice(0, 10);
+            let reportTime = (timeInput && timeInput.value) ? timeInput.value : now.toTimeString().slice(0, 8);
+            if (reportTime.length === 5) {
+                reportTime += ':00';
+            }
+
+            const photoUrl = photoInput && photoInput.value ? photoInput.value.trim() : '';
+
+            const payload = {
+                foreman_id: foremanIdValue,
+                work_id: workIdValue,
+                quantity: quantityValue,
+                report_date: reportDate,
+                report_time: reportTime,
+                photo_report_url: photoUrl
+            };
+
+            const response = await makeApiRequest(API_CONFIG.ENDPOINTS.WORK_REPORTS, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+
+            if (!response || !response.success) {
+                const errorMessage = response?.error || response?.detail || 'Не удалось отправить отчет';
+                showNotification(errorMessage, 'error');
+                return;
+            }
+
+            showNotification('Отчет успешно отправлен', 'success');
+            closeSendReportModal();
+
+            await loadWorks();
+            await loadAllReports();
+        } catch (error) {
+            console.error('Ошибка при отправке отчета:', error);
+            showNotification('Ошибка при отправке отчета: ' + error.message, 'error');
+        } finally {
+            if (submitButton) {
+                submitButton.disabled = false;
+            }
+        }
+    }
+
     // ========== РАБОТЫ ==========
-    
+
     // Загрузка работ
     async function loadWorks() {
         const loadingElement = document.getElementById('worksLoading');
