@@ -2538,6 +2538,7 @@ async def get_accumulative_statement():
                     END AS Процент_выполнения
                 FROM work_reports wr
                 JOIN works w ON wr.work_id = w.id
+                WHERE wr.is_verified = 1
                 GROUP BY w.category, w.name, w.unit, w.project_total
                 ORDER BY w.category, w.name
             ''') as cursor:
