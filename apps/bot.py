@@ -843,7 +843,7 @@ def is_valid_position(position: str) -> bool:
 # === КЛАВИАТУРЫ ===
 def get_main_keyboard(user_id: int):
     keyboard = [
-        [KeyboardButton(text='📊 Отправить отчет')],
+        [KeyboardButton(text='📊 Сформировать отчет')],
         [KeyboardButton(text='👥 Отправить фото отчет (Люди)')],
         [KeyboardButton(text='📋 Актуальные задачи')],
         [KeyboardButton(text='ℹ️ Помощь')]
