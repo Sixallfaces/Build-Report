@@ -14,7 +14,7 @@ import logging
 import traceback
 import urllib.parse
 import aiosqlite # Импортируем aiosqlite
-from typing import Optional
+from typing import Optional, List
 
 # Настройка логирования
 logging.basicConfig(
@@ -195,12 +195,89 @@ async def check_access(user_id: int):
         logger.error(f"⚠️ Ошибка проверки доступа: {e}")
         return False, "❌ Ошибка проверки доступа. Попробуйте позже."
 
-async def get_active_works():
-    """Получает список активных работ из базы данных."""
+async def ensure_foreman_sections_table():
+    """Гарантирует наличие таблицы связей бригадир-раздел."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS foreman_sections (
+                    foreman_id INTEGER NOT NULL,
+                    category_id INTEGER NOT NULL,
+                    PRIMARY KEY (foreman_id, category_id),
+                    FOREIGN KEY (foreman_id) REFERENCES foremen(id) ON DELETE CASCADE,
+                    FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+                )
+                """
+            )
+            await db.commit()
+    except Exception as e:
+        logger.error(f"⚠️ Ошибка создания таблицы foreman_sections: {e}")
+
+
+async def get_assigned_category_names(foreman_id: int) -> Optional[List[str]]:
+    """Возвращает список названий разделов, закрепленных за бригадиром."""
+    await ensure_foreman_sections_table()
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                "SELECT id, name, category, unit, balance, project_total, is_active FROM works WHERE is_active = 1"
+                """
+                SELECT c.name
+                FROM foreman_sections fs
+                JOIN categories c ON fs.category_id = c.id
+                WHERE fs.foreman_id = ?
+                ORDER BY c.name
+                """,
+                (foreman_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                categories = [
+                    (row[0] or '').strip()
+                    for row in rows
+                    if (row[0] or '').strip()
+                ]
+                logger.debug(
+                    "🔗 Найдено %d разделов для бригадира %s", len(categories), foreman_id
+                )
+                return categories
+    except Exception as e:
+        logger.error(f"⚠️ Ошибка получения разделов для бригадира {foreman_id}: {e}")
+        logger.error(traceback.format_exc())
+        return None
+
+
+async def get_active_works(foreman_id: Optional[int] = None):
+    """Получает список активных работ из базы данных."""
+    assigned_categories: Optional[List[str]] = None
+    if foreman_id is not None and foreman_id not in MANAGER_USER_IDS:
+        assigned_categories = await get_assigned_category_names(foreman_id)
+        if assigned_categories is None:
+            logger.warning(
+                "⚠️ Не удалось получить разделы для бригадира %s. Работы не будут отфильтрованы.",
+                foreman_id,
+            )
+
+    query = (
+        "SELECT id, name, category, unit, balance, project_total, is_active "
+        "FROM works WHERE is_active = 1"
+    )
+    params: List[str] = []
+
+    if assigned_categories is not None:
+        if not assigned_categories:
+            logger.info(
+                "🔍 Для бригадира %s не назначено активных разделов.",
+                foreman_id,
+            )
+            return []
+
+        placeholders = ",".join(["?"] * len(assigned_categories))
+        query += f" AND TRIM(IFNULL(category, '')) IN ({placeholders})"
+        params.extend(assigned_categories)
+
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(query, params) as cursor:
             ) as cursor:
                 rows = await cursor.fetchall()
                 works = []
@@ -920,7 +997,7 @@ async def handle_main_menu(message: types.Message, state: FSMContext):
         else:
             await message.answer("❌ У вас нет доступа к этой функции.")
     elif text == '📊 Сформировать отчет':
-        works = await get_active_works()
+        works = await get_active_works(user_id)
         if not works:
             await message.answer("📝 Нет доступных работ для отчета. Обратитесь к администратору.")
             return
@@ -947,7 +1024,7 @@ async def handle_main_menu(message: types.Message, state: FSMContext):
         )
         await state.set_state(Form.waiting_people_photo)
     elif text == '📋 Актуальные задачи':
-        works = await get_active_works()
+        works = await get_active_works(user_id)
         if works:
             works_list = "\n".join([
                 f"• {work['Название работы']} ({work.get('Категория', 'N/A')}) - "
@@ -1245,7 +1322,7 @@ async def handle_work_quantity(message: types.Message, state: FSMContext):
         category_map = data.get('categories')
         works = data.get('all_works')
         if not works:
-            works = await get_active_works()
+            works = await get_active_works(user_id)
             if works:
                 await state.update_data(all_works=works)
         if not category_map and works:
@@ -1291,7 +1368,7 @@ async def handle_photo_choice(message: types.Message, state: FSMContext):
         work_id = data.get('work_id', 0) # Получаем ID
         work_name = data.get('work_name', 'Неизвестная работа') # Получаем имя
         # Нужно получить unit и category заново из БД, так как они не сохранены в FSM
-        works = await get_active_works()
+        works = await get_active_works(user_id)
         selected_work = next((w for w in works if w['id'] == work_id), None)
         unit = selected_work.get('Единица измерения', 'шт') if selected_work else 'шт'
         await message.answer(f"Введите количество ({unit}):", reply_markup=get_back_keyboard())
@@ -1404,7 +1481,7 @@ async def save_report_with_photo(message: types.Message, state: FSMContext, phot
         new_balance = balance_result
 
         # Нужно получить unit заново из БД
-        works = await get_active_works()
+        works = await get_active_works(message.from_user.id)
         selected_work = next((w for w in works if w['id'] == work_id), None)
         unit = selected_work.get('Единица измерения', 'шт') if selected_work else 'шт'
 
