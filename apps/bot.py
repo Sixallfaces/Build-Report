@@ -215,9 +215,27 @@ async def ensure_foreman_sections_table():
         logger.error(f"⚠️ Ошибка создания таблицы foreman_sections: {e}")
 
 
+async def ensure_categories_table():
+    """Гарантирует наличие таблицы категорий."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS categories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    created_date TEXT NOT NULL
+                )
+                """
+            )
+            await db.commit()
+    except Exception as e:
+        logger.error(f"⚠️ Ошибка создания таблицы categories: {e}")
+
 async def get_assigned_category_names(foreman_id: int) -> Optional[List[str]]:
     """Возвращает список названий разделов, закрепленных за бригадиром."""
     await ensure_foreman_sections_table()
+    await ensure_categories_table()
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
@@ -248,37 +266,32 @@ async def get_assigned_category_names(foreman_id: int) -> Optional[List[str]]:
 
 async def get_active_works(foreman_id: Optional[int] = None):
     """Получает список активных работ из базы данных."""
-    assigned_categories: Optional[List[str]] = None
-    if foreman_id is not None and foreman_id not in MANAGER_USER_IDS:
-        assigned_categories = await get_assigned_category_names(foreman_id)
-        if assigned_categories is None:
-            logger.warning(
-                "⚠️ Не удалось получить разделы для бригадира %s. Работы не будут отфильтрованы.",
-                foreman_id,
-            )
+    filter_by_sections = foreman_id is not None and foreman_id not in MANAGER_USER_IDS
+
+    if filter_by_sections:
+        await ensure_foreman_sections_table()
+        await ensure_categories_table()
 
     query = (
-        "SELECT id, name, category, unit, balance, project_total, is_active "
-        "FROM works WHERE is_active = 1"
+        "SELECT w.id, w.name, w.category, w.unit, w.balance, w.project_total, w.is_active "
+        "FROM works w WHERE w.is_active = 1"
     )
-    params: List[str] = []
+    params: List[int] = []
 
-    if assigned_categories is not None:
-        if not assigned_categories:
-            logger.info(
-                "🔍 Для бригадира %s не назначено активных разделов.",
-                foreman_id,
-            )
-            return []
-
-        placeholders = ",".join(["?"] * len(assigned_categories))
-        query += f" AND TRIM(IFNULL(category, '')) IN ({placeholders})"
-        params.extend(assigned_categories)
+    if filter_by_sections:
+        query += (
+            " AND EXISTS ("
+            "SELECT 1 FROM foreman_sections fs "
+            "JOIN categories c ON fs.category_id = c.id "
+            "WHERE fs.foreman_id = ? "
+            "AND TRIM(IFNULL(c.name, '')) = TRIM(IFNULL(w.category, ''))"
+            ")"
+        )
+        params.append(foreman_id)
 
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(query, params) as cursor:
-            ) as cursor:
                 rows = await cursor.fetchall()
                 works = []
                 for row in rows:
@@ -292,6 +305,13 @@ async def get_active_works(foreman_id: Optional[int] = None):
                         'Проект': project_total,
                         'is_active': is_active
                     })
+
+                if filter_by_sections and not works:
+                    logger.info(
+                        "🔍 Для бригадира %s не найдено работ в назначенных разделах.",
+                        foreman_id,
+                    )
+                    
                 logger.info(f"🔍 Найдено активных работ: {len(works)}")
                 return works
     except Exception as e:
