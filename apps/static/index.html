@@ -721,7 +721,63 @@
             width: 100%;
             box-sizing: border-box;
         }
-        
+
+        .foreman-sections-modal .modal-content {
+            max-width: 560px;
+        }
+
+        .foreman-sections-select-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .foreman-sections-select-row select {
+            flex: 1;
+        }
+
+        .foreman-sections-list {
+            border: 1px solid var(--secondary);
+            border-radius: 6px;
+            background: rgba(30, 47, 64, 0.6);
+            max-height: 220px;
+            overflow-y: auto;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .foreman-sections-list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 10px;
+            border-radius: 4px;
+            border: 1px solid var(--secondary);
+            background: rgba(255, 255, 255, 0.05);
+            transition: all 0.3s ease;
+        }
+
+        .foreman-sections-list-item:hover {
+            background: rgba(84, 176, 165, 0.1);
+            transform: translateX(5px);
+        }
+
+        .foreman-sections-list-item button {
+            margin: 0;
+            padding: 4px 10px;
+            font-size: 0.8rem;
+        }
+
+        .foreman-sections-list-empty {
+            text-align: center;
+            color: var(--accent);
+            opacity: 0.7;
+            padding: 10px 0;
+        }
+
         /* Стили для списка категорий в модальном окне */
         .categories-list {
             border: 1px solid var(--secondary);
@@ -991,6 +1047,29 @@
             <div class="modal-actions">
                 <button onclick="saveWorkMaterials()" class="success">💾 Сохранить</button>
                 <button onclick="closeWorkMaterialsModal()" class="secondary">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="foremanSectionsModal" class="modal foreman-sections-modal">
+        <div class="modal-content">
+            <h3 class="modal-title">Разделы бригадира</h3>
+            <p class="modal-subtitle">Бригадир: <span id="foremanSectionsName"></span></p>
+
+            <div class="foreman-sections-select-row">
+                <select id="foremanSectionsSelect" class="login-input">
+                    <option value="">Выберите раздел</option>
+                </select>
+                <button type="button" class="success" onclick="addSectionToForeman()">➕ Добавить</button>
+            </div>
+
+            <div id="foremanSectionsList" class="foreman-sections-list">
+                <div class="foreman-sections-list-empty">Разделы не назначены</div>
+            </div>
+
+            <div class="modal-actions">
+                <button onclick="saveForemanSections()" class="success">💾 Сохранить</button>
+                <button onclick="closeForemanSectionsModal()" class="secondary">Закрыть</button>
             </div>
         </div>
     </div>
@@ -1368,6 +1447,8 @@
     let materialHistory = [];
     let materialHistoryLoaded = false;
     let isMaterialHistoryView = false;
+    let currentForemanIdForSections = null;
+    let currentForemanSections = [];
 
     // Переменные для сортировки
     let currentSortColumn = -1;
@@ -3701,6 +3782,11 @@
                     await loadWorks();
                 }
                 displayMaterials(materials);
+                const foremanSectionsModal = document.getElementById('foremanSectionsModal');
+                if (foremanSectionsModal && foremanSectionsModal.style.display === 'flex') {
+                    populateForemanSectionsSelect();
+                    displayForemanSectionsList();
+                }
             } else {
                 showNotification('Ошибка при загрузке категорий: ' + data.error, 'error');
             }
@@ -4084,17 +4170,212 @@
                 </td>
                 <td class="action-buttons">
                     <button onclick="saveForeman(${foreman.id})" class="secondary">💾 Сохранить</button>
+                    <button onclick="openForemanSections(${foreman.id})" class="secondary" title="Привязать разделы">🧾</button>
                     <button onclick="deleteForeman(${foreman.id})" class="danger">🗑️ Удалить</button>
                 </td>
             `;
             tableBody.appendChild(row);
         });
     }
-    
+
+    async function openForemanSections(foremanId) {
+        const modal = document.getElementById('foremanSectionsModal');
+        if (!modal) {
+            return;
+        }
+
+        const foreman = foremen.find(item => item.id === foremanId);
+        if (!foreman) {
+            showNotification('Бригадир не найден', 'error');
+            return;
+        }
+
+        currentForemanIdForSections = foremanId;
+        const nameParts = [];
+        if (foreman.full_name) {
+            nameParts.push(foreman.full_name);
+        }
+        if (foreman.position) {
+            nameParts.push(foreman.position);
+        }
+        document.getElementById('foremanSectionsName').textContent = nameParts.join(' • ') || `ID ${foremanId}`;
+
+        if (!categories || categories.length === 0) {
+            await loadCategories();
+        }
+
+        await loadForemanSections(foremanId);
+        populateForemanSectionsSelect();
+        displayForemanSectionsList();
+        const select = document.getElementById('foremanSectionsSelect');
+        if (select) {
+            select.value = '';
+        }
+
+        modal.style.display = 'flex';
+    }
+
+    async function loadForemanSections(foremanId) {
+        try {
+            const response = await makeApiRequest(`${API_CONFIG.ENDPOINTS.FOREMEN}/${foremanId}/sections`);
+            if (response && response.success) {
+                currentForemanSections = (response.data || []).map(item => ({
+                    id: item.id,
+                    name: item.name
+                }));
+            } else {
+                currentForemanSections = [];
+                const errorMessage = response?.error || response?.detail || 'Не удалось загрузить разделы бригадира';
+                showNotification(errorMessage, 'error');
+            }
+        } catch (error) {
+            currentForemanSections = [];
+            showNotification('Ошибка при загрузке разделов бригадира: ' + error.message, 'error');
+        }
+    }
+
+    function populateForemanSectionsSelect() {
+        const select = document.getElementById('foremanSectionsSelect');
+        if (!select) {
+            return;
+        }
+
+        const assignedIds = new Set((currentForemanSections || []).map(item => item.id));
+
+        if (!categories || categories.length === 0) {
+            select.innerHTML = '<option value="">Нет доступных разделов</option>';
+            select.disabled = true;
+            return;
+        }
+
+        let optionsHtml = '<option value="">Выберите раздел</option>';
+        categories.forEach(category => {
+            const disabled = assignedIds.has(category.id) ? 'disabled' : '';
+            optionsHtml += `<option value="${category.id}" ${disabled}>${category.name}</option>`;
+        });
+
+        select.innerHTML = optionsHtml;
+        select.disabled = false;
+    }
+
+    function displayForemanSectionsList() {
+        const listContainer = document.getElementById('foremanSectionsList');
+        if (!listContainer) {
+            return;
+        }
+
+        if (!currentForemanSections || currentForemanSections.length === 0) {
+            listContainer.innerHTML = '<div class="foreman-sections-list-empty">Разделы не назначены</div>';
+            return;
+        }
+
+        const rows = currentForemanSections.map(section => `
+            <div class="foreman-sections-list-item" data-section-id="${section.id}">
+                <span>${section.name || `ID ${section.id}`}</span>
+                <button type="button" class="danger" onclick="removeSectionFromForeman(${section.id})">🗑️</button>
+            </div>
+        `);
+
+        listContainer.innerHTML = rows.join('');
+    }
+
+    function addSectionToForeman() {
+        const select = document.getElementById('foremanSectionsSelect');
+        if (!select) {
+            return;
+        }
+
+        const selectedValue = select.value;
+        if (!selectedValue) {
+            showNotification('Выберите раздел для добавления', 'error');
+            return;
+        }
+
+        let categoryId;
+        try {
+            categoryId = parseInt(selectedValue, 10);
+        } catch (e) {
+            categoryId = NaN;
+        }
+
+        if (!Number.isInteger(categoryId) || categoryId <= 0) {
+            showNotification('Некорректный идентификатор раздела', 'error');
+            return;
+        }
+
+        if (currentForemanSections.some(section => section.id === categoryId)) {
+            showNotification('Раздел уже добавлен', 'error');
+            return;
+        }
+
+        const category = categories.find(cat => cat.id === categoryId);
+        if (!category) {
+            showNotification('Раздел не найден в списке категорий', 'error');
+            return;
+        }
+
+        currentForemanSections = [...currentForemanSections, { id: category.id, name: category.name }];
+        displayForemanSectionsList();
+        populateForemanSectionsSelect();
+        select.value = '';
+    }
+
+    function removeSectionFromForeman(categoryId) {
+        currentForemanSections = currentForemanSections.filter(section => section.id !== categoryId);
+        displayForemanSectionsList();
+        populateForemanSectionsSelect();
+    }
+
+    async function saveForemanSections() {
+        if (!currentForemanIdForSections) {
+            showNotification('Не выбран бригадир для сохранения разделов', 'error');
+            return;
+        }
+
+        const categoryIds = currentForemanSections.map(section => section.id);
+
+        try {
+            const response = await makeApiRequest(`${API_CONFIG.ENDPOINTS.FOREMEN}/${currentForemanIdForSections}/sections`, {
+                method: 'PUT',
+                body: JSON.stringify({ category_ids: categoryIds })
+            });
+
+            if (response && response.success) {
+                const updatedSections = Array.isArray(response.data) ? response.data : null;
+                if (updatedSections) {
+                    currentForemanSections = updatedSections.map(item => ({ id: item.id, name: item.name }));
+                    displayForemanSectionsList();
+                    populateForemanSectionsSelect();
+                }
+                showNotification('Разделы бригадира обновлены', 'success');
+            } else {
+                const errorMessage = response?.error || response?.detail || 'Не удалось сохранить разделы бригадира';
+                showNotification(errorMessage, 'error');
+            }
+        } catch (error) {
+            showNotification('Ошибка при сохранении разделов: ' + error.message, 'error');
+        }
+    }
+
+    function closeForemanSectionsModal() {
+        const modal = document.getElementById('foremanSectionsModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+        currentForemanIdForSections = null;
+        currentForemanSections = [];
+        const select = document.getElementById('foremanSectionsSelect');
+        if (select) {
+            select.value = '';
+        }
+        displayForemanSectionsList();
+        populateForemanSectionsSelect();
+    }
+
     async function saveForeman(foremanId) {
         const row = document.querySelector(`tr:has(input[value="${foremanId}"])`);
         const inputs = row.querySelectorAll('.editable');
-        
+
         const foremanData = { id: foremanId };
         inputs.forEach(input => {
             const field = input.getAttribute('data-field');

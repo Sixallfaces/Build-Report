@@ -527,6 +527,122 @@ async def delete_foreman_from_db(foreman_id: int):
         logger.error(f"❌ Ошибка удаления бригадира ID {foreman_id}: {e}")
         return False, f"Ошибка удаления: {str(e)}"
 
+async def ensure_foreman_sections_table():
+    """Создает таблицу связей бригадир-раздел при необходимости."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS foreman_sections (
+                    foreman_id INTEGER NOT NULL,
+                    category_id INTEGER NOT NULL,
+                    PRIMARY KEY (foreman_id, category_id),
+                    FOREIGN KEY (foreman_id) REFERENCES foremen(id) ON DELETE CASCADE,
+                    FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+                )
+                """
+            )
+            await db.commit()
+    except Exception as exc:
+        logger.error(f"⚠️ Не удалось гарантировать наличие таблицы foreman_sections: {exc}")
+
+
+async def fetch_foreman_sections(db, foreman_id: int) -> List[dict]:
+    """Возвращает список разделов для бригадира, используя существующее соединение."""
+    async with db.execute(
+        """
+        SELECT c.id, c.name
+        FROM foreman_sections fs
+        JOIN categories c ON fs.category_id = c.id
+        WHERE fs.foreman_id = ?
+        ORDER BY c.name
+        """,
+        (foreman_id,)
+    ) as cursor:
+        rows = await cursor.fetchall()
+        return [{"id": row[0], "name": row[1]} for row in rows]
+
+
+async def get_foreman_sections_from_db(foreman_id: int) -> List[dict]:
+    """Получает список разделов, закрепленных за бригадиром."""
+    await ensure_foreman_sections_table()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            return await fetch_foreman_sections(db, foreman_id)
+    except Exception as exc:
+        logger.error(f"⚠️ Ошибка получения разделов для бригадира {foreman_id}: {exc}")
+        return []
+
+
+async def replace_foreman_sections_for_foreman(foreman_id: int, category_ids: List[int]):
+    """Полностью заменяет список разделов, закрепленных за бригадиром."""
+    await ensure_foreman_sections_table()
+
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT 1 FROM foremen WHERE id = ?",
+                (foreman_id,)
+            ) as cursor:
+                if await cursor.fetchone() is None:
+                    return False, "Бригадир не найден", None
+
+            unique_ids = []
+            seen = set()
+            for raw_id in category_ids:
+                try:
+                    category_id = int(raw_id)
+                except (TypeError, ValueError):
+                    return False, "Идентификатор раздела должен быть числом", None
+                if category_id <= 0:
+                    return False, "Идентификатор раздела должен быть положительным", None
+                if category_id not in seen:
+                    seen.add(category_id)
+                    unique_ids.append(category_id)
+
+            if unique_ids:
+                placeholders = ",".join(["?"] * len(unique_ids))
+                async with db.execute(
+                    f"SELECT id FROM categories WHERE id IN ({placeholders})",
+                    unique_ids
+                ) as cursor:
+                    existing_ids = {row[0] for row in await cursor.fetchall()}
+                missing = [category_id for category_id in unique_ids if category_id not in existing_ids]
+                if missing:
+                    return False, f"Некоторые разделы не найдены: {', '.join(map(str, missing))}", None
+
+            try:
+                await db.execute("BEGIN")
+                await db.execute("DELETE FROM foreman_sections WHERE foreman_id = ?", (foreman_id,))
+                for category_id in unique_ids:
+                    await db.execute(
+                        "INSERT INTO foreman_sections (foreman_id, category_id) VALUES (?, ?)",
+                        (foreman_id, category_id)
+                    )
+                await db.commit()
+                logger.info(f"🔗 Обновлены разделы для бригадира ID: {foreman_id}")
+            except Exception as exc:
+                await db.rollback()
+                logger.error(f"⚠️ Ошибка транзакции обновления разделов для бригадира {foreman_id}: {exc}")
+                return False, "Не удалось обновить разделы бригадира", None
+
+            updated_sections = await fetch_foreman_sections(db, foreman_id)
+            return True, None, updated_sections
+    except Exception as exc:
+        logger.error(f"⚠️ Ошибка обновления разделов бригадира {foreman_id}: {exc}")
+        return False, str(exc), None
+
+
+async def foreman_exists(foreman_id: int) -> bool:
+    """Проверяет наличие бригадира в базе данных."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT 1 FROM foremen WHERE id = ?", (foreman_id,)) as cursor:
+                return await cursor.fetchone() is not None
+    except Exception as exc:
+        logger.error(f"⚠️ Ошибка проверки существования бригадира {foreman_id}: {exc}")
+        return False
+
 # ========== ФУНКЦИИ ДЛЯ КАТЕГОРИЙ ==========
 async def init_categories_table():
     """Создает таблицу для категорий"""
@@ -2341,6 +2457,58 @@ async def delete_foreman(foreman_id: int):
         return {"success": True, "message": message}
     else:
         raise HTTPException(status_code=400, detail=message)
+    
+@app.get("/api/foremen/{foreman_id}/sections")
+async def get_foreman_sections(foreman_id: int):
+    if not await foreman_exists(foreman_id):
+        raise HTTPException(status_code=404, detail="Бригадир не найден")
+
+    sections = await get_foreman_sections_from_db(foreman_id)
+    return {"success": True, "data": sections}
+
+
+@app.put("/api/foremen/{foreman_id}/sections")
+async def update_foreman_sections(foreman_id: int, request: Request):
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Неверный формат JSON")
+
+    if isinstance(payload, dict):
+        raw_ids = payload.get('category_ids')
+        if raw_ids is None:
+            raw_ids = payload.get('categories', [])
+    elif isinstance(payload, list):
+        raw_ids = payload
+    elif payload is None:
+        raw_ids = []
+    else:
+        raise HTTPException(status_code=400, detail="Некорректный формат данных")
+
+    category_ids = []
+    seen = set()
+    for item in raw_ids:
+        try:
+            category_id = int(item)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Идентификатор раздела должен быть числом")
+        if category_id <= 0:
+            raise HTTPException(status_code=400, detail="Идентификатор раздела должен быть положительным")
+        if category_id not in seen:
+            seen.add(category_id)
+            category_ids.append(category_id)
+
+    success, message, sections = await replace_foreman_sections_for_foreman(foreman_id, category_ids)
+    if not success:
+        if message == "Бригадир не найден":
+            raise HTTPException(status_code=404, detail=message)
+        raise HTTPException(status_code=400, detail=message or "Не удалось сохранить разделы")
+
+    return {
+        "success": True,
+        "message": "Разделы бригадира обновлены",
+        "data": sections or []
+    }
 
 # Эндпоинты для отчетов
 @app.get("/api/reports/{date}")
