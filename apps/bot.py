@@ -14,7 +14,7 @@ import logging
 import traceback
 import urllib.parse
 import aiosqlite # Импортируем aiosqlite
-from typing import Optional, List
+from typing import Optional, List, Set
 
 # Настройка логирования
 logging.basicConfig(
@@ -272,6 +272,20 @@ async def get_active_works(foreman_id: Optional[int] = None):
         await ensure_foreman_sections_table()
         await ensure_categories_table()
 
+    def normalize_category_name(name: Optional[str]) -> str:
+        return (name or '').strip().lower()
+
+    assigned_categories: Set[str] = set()
+    if filter_by_sections:
+        assigned = await get_assigned_category_names(foreman_id) or []
+        assigned_categories = {normalize_category_name(category) for category in assigned if category is not None}
+        if not assigned_categories:
+            logger.info(
+                "🔒 У бригадира %s нет назначенных разделов.",
+                foreman_id,
+            )
+            return []
+
     query = (
         "SELECT w.id, w.name, w.category, w.unit, w.balance, w.project_total, w.is_active "
         "FROM works w WHERE w.is_active = 1"
@@ -284,7 +298,7 @@ async def get_active_works(foreman_id: Optional[int] = None):
             "SELECT 1 FROM foreman_sections fs "
             "JOIN categories c ON fs.category_id = c.id "
             "WHERE fs.foreman_id = ? "
-            "AND TRIM(IFNULL(c.name, '')) = TRIM(IFNULL(w.category, ''))"
+            "AND LOWER(TRIM(IFNULL(c.name, ''))) = LOWER(TRIM(IFNULL(w.category, '')))"
             ")"
         )
         params.append(foreman_id)
@@ -296,6 +310,8 @@ async def get_active_works(foreman_id: Optional[int] = None):
                 works = []
                 for row in rows:
                     work_id, name, category, unit, balance, project_total, is_active = row
+                    if filter_by_sections and normalize_category_name(category) not in assigned_categories:
+                        continue
                     works.append({
                         'id': work_id,
                         'Название работы': name,
@@ -311,7 +327,7 @@ async def get_active_works(foreman_id: Optional[int] = None):
                         "🔍 Для бригадира %s не найдено работ в назначенных разделах.",
                         foreman_id,
                     )
-                    
+
                 logger.info(f"🔍 Найдено активных работ: {len(works)}")
                 return works
     except Exception as e:
