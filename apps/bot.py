@@ -14,7 +14,8 @@ import logging
 import traceback
 import urllib.parse
 import aiosqlite # Импортируем aiosqlite
-from typing import List, Optional, Set
+from typing import List, Optional
+
 
 # Настройка логирования
 logging.basicConfig(
@@ -195,17 +196,12 @@ async def check_access(user_id: int):
         logger.error(f"⚠️ Ошибка проверки доступа: {e}")
         return False, "❌ Ошибка проверки доступа. Попробуйте позже."
 
-def _normalize_category_name(value: Optional[str]) -> str:
-    """Приводит название раздела к унифицированному виду для сравнения."""
-    normalized = re.sub(r"\s+", " ", (value or "").strip())
-    return normalized.lower()
-
 sync def _fetch_assigned_category_names(db, foreman_id: int) -> Optional[List[str]]:
     """Возвращает список названий разделов, закрепленных за бригадиром."""
     try:
         async with db.execute(
             """
-            SELECT DISTINCT c.name
+            SELECT c.name
             FROM foreman_sections fs
             JOIN categories c ON fs.category_id = c.id
             WHERE fs.foreman_id = ?
@@ -234,7 +230,8 @@ async def get_active_works(foreman_id: Optional[int] = None):
     """Получает список активных работ из базы данных. Может ограничивать список по закрепленным разделам."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            allowed_categories: Optional[Set[str]] = None
+            filter_clause = ""
+            params: List = []
 
             if foreman_id is not None:
                 assigned_categories = await _fetch_assigned_category_names(db, foreman_id)
@@ -244,58 +241,44 @@ async def get_active_works(foreman_id: Optional[int] = None):
                     )
                     return []
                 if assigned_categories:
-                    allowed_categories = {
-                        normalized
-                        for name in assigned_categories
-                        for normalized in [_normalize_category_name(name)]
-                        if normalized
-                    }
-                    if not allowed_categories:
-                        logger.warning(
-                            "⚠️ У бригадира %s есть закрепленные разделы, но все они пустые после нормализации",
-                            foreman_id,
+                    filter_clause = """
+                        AND EXISTS (
+                            SELECT 1
+                            FROM foreman_sections fs
+                            JOIN categories c ON fs.category_id = c.id
+                            WHERE fs.foreman_id = ?
+                              AND UPPER(TRIM(COALESCE(c.name, ''))) = UPPER(TRIM(COALESCE(w.category, '')))
                         )
-                        return []
+                    """
+                    params.append(foreman_id)
 
-            async with db.execute(
-                """
+            query = f"""
                 SELECT w.id, w.name, w.category, w.unit, w.balance, w.project_total, w.is_active
                 FROM works w
                 WHERE w.is_active = 1
-                """
-            ) as cursor:
+                {filter_clause}
+            """
+
+            async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
-                works: List[dict] = []
-            for row in rows:
-                work_id, name, category, unit, balance, project_total, is_active = row
-                works.append({
-                    'id': work_id,
-                    'Название работы': name,
-                    'Категория': category,
-                    'Единица измерения': unit,
-                    'На балансе': balance,
-                    'Проект': project_total,
-                    'is_active': is_active
-                })
-
-            if allowed_categories is not None:
-                filtered_works = [
-                    work for work in works
-                    if _normalize_category_name(work.get('Категория')) in allowed_categories
-                ]
+                works = []
+                for row in rows:
+                    work_id, name, category, unit, balance, project_total, is_active = row
+                    works.append({
+                        'id': work_id,
+                        'Название работы': name,
+                        'Категория': category,
+                        'Единица измерения': unit,
+                        'На балансе': balance,
+                        'Проект': project_total,
+                        'is_active': is_active
+                    })
                 logger.info(
-                    "🔍 Найдено активных работ: %s (для бригадира %s, до фильтра %s)",
-                    len(filtered_works),
-                    foreman_id,
+                    "🔍 Найдено активных работ: %s (фильтр по бригадиру: %s)",
                     len(works),
+                    foreman_id,
                 )
-                return filtered_works
-
-            logger.info(
-                "🔍 Найдено активных работ: %s (фильтр не применялся)",
-                len(works),
-            )
-            return works
+                return works
     except Exception as e:
         logger.error(f"⚠️ Ошибка получения работ: {e}")
         logger.error(traceback.format_exc())
