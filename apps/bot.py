@@ -232,6 +232,10 @@ async def ensure_categories_table():
     except Exception as e:
         logger.error(f"⚠️ Ошибка создания таблицы categories: {e}")
 
+def normalize_category_name(name: Optional[str]) -> str:
+    """Нормализует название раздела для сравнения."""
+    return (name or '').strip().lower()
+
 async def get_assigned_category_names(foreman_id: int) -> Optional[List[str]]:
     """Возвращает список названий разделов, закрепленных за бригадиром."""
     await ensure_foreman_sections_table()
@@ -263,55 +267,46 @@ async def get_assigned_category_names(foreman_id: int) -> Optional[List[str]]:
         logger.error(traceback.format_exc())
         return None
 
+async def _get_assigned_category_set(foreman_id: int) -> Set[str]:
+    """Возвращает множество нормализованных названий разделов для бригадира."""
+    assigned = await get_assigned_category_names(foreman_id) or []
+    normalized = {normalize_category_name(category) for category in assigned if category}
+    if not normalized:
+        logger.info("🔒 У бригадира %s нет назначенных разделов.", foreman_id)
+        return set()
+    return normalized
 
 async def get_active_works(foreman_id: Optional[int] = None):
     """Получает список активных работ из базы данных."""
     filter_by_sections = foreman_id is not None and foreman_id not in MANAGER_USER_IDS
 
+    assigned_categories: Set[str] = set()
     if filter_by_sections:
         await ensure_foreman_sections_table()
         await ensure_categories_table()
 
-    def normalize_category_name(name: Optional[str]) -> str:
-        return (name or '').strip().lower()
+        assigned_categories = await _get_assigned_category_set(foreman_id)
 
-    assigned_categories: Set[str] = set()
-    if filter_by_sections:
-        assigned = await get_assigned_category_names(foreman_id) or []
-        assigned_categories = {normalize_category_name(category) for category in assigned if category is not None}
         if not assigned_categories:
-            logger.info(
-                "🔒 У бригадира %s нет назначенных разделов.",
-                foreman_id,
-            )
+            
             return []
 
     query = (
         "SELECT w.id, w.name, w.category, w.unit, w.balance, w.project_total, w.is_active "
         "FROM works w WHERE w.is_active = 1"
     )
-    params: List[int] = []
-
-    if filter_by_sections:
-        query += (
-            " AND EXISTS ("
-            "SELECT 1 FROM foreman_sections fs "
-            "JOIN categories c ON fs.category_id = c.id "
-            "WHERE fs.foreman_id = ? "
-            "AND LOWER(TRIM(IFNULL(c.name, ''))) = LOWER(TRIM(IFNULL(w.category, '')))"
-            ")"
-        )
-        params.append(foreman_id)
+    
 
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute(query, params) as cursor:
+            async with db.execute(query) as cursor:
                 rows = await cursor.fetchall()
                 works = []
                 for row in rows:
                     work_id, name, category, unit, balance, project_total, is_active = row
-                    if filter_by_sections and normalize_category_name(category) not in assigned_categories:
-                        continue
+                    if filter_by_sections:
+                        if normalize_category_name(category) not in assigned_categories:
+                            continue
                     works.append({
                         'id': work_id,
                         'Название работы': name,
