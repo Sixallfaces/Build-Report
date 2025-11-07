@@ -356,7 +356,25 @@
         .action-buttons button.success:hover {
             background: #219653;
         }
-        
+
+        .action-buttons .verify-button {
+            background: #7f8c8d;
+            color: #ffffff;
+        }
+
+        .action-buttons .verify-button:hover {
+            background: #707b7c;
+        }
+
+        .action-buttons .verify-button.verified {
+            background: #27ae60;
+            color: #ffffff;
+        }
+
+        .action-buttons .verify-button.verified:hover {
+            background: #1f8f4d;
+        }
+
         /* Формы ввода */
         input, select, textarea {
             width: 100%;
@@ -4324,6 +4342,11 @@
                 `<a href="${report.photo_report_url}" target="_blank" style="color: var(--primary);">📷 Просмотреть</a>` :
                 'Нет фото';
 
+            const isVerified = Boolean(report.is_verified);
+            const verifyButtonClass = `verify-button${isVerified ? ' verified' : ''}`;
+            const verifyButtonLabel = isVerified ? '✅' : 'Проверить';
+            const verifyButtonTitle = isVerified ? 'Отчет подтвержден' : 'Отметить отчет как проверенный';
+
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${report.id}</td>
@@ -4337,6 +4360,7 @@
                 <td class="action-buttons">
                     <button onclick="editReport(${report.id})" class="secondary">✏️</button>
                     <button onclick="deleteReport(${report.id})" class="danger">🗑️</button>
+                    <button onclick="toggleReportVerification(${report.id}, ${!isVerified})" class="${verifyButtonClass}" title="${verifyButtonTitle}">${verifyButtonLabel}</button>
                 </td>
             `;
             tableBody.appendChild(row);
@@ -4365,8 +4389,42 @@
             }
         }
     }
-    
+
+    async function toggleReportVerification(reportId, shouldVerify) {
+        try {
+            const response = await makeApiRequest(`${API_CONFIG.ENDPOINTS.REPORT}/${reportId}/verify`, {
+                method: 'POST',
+                body: JSON.stringify({ is_verified: shouldVerify })
+            });
+
+            if (response.success) {
+                const updatedStatus = response.data?.is_verified ?? shouldVerify;
+                const reportIndex = allReports.findIndex(report => report.id === reportId);
+                if (reportIndex !== -1) {
+                    allReports[reportIndex].is_verified = updatedStatus;
+                }
+
+                const message = updatedStatus ? 'Отчет отмечен как проверенный' : 'Отметка проверки снята';
+                showNotification(message, 'success');
+
+                const searchInput = document.getElementById('searchAllReports');
+                if (searchInput && searchInput.value.trim()) {
+                    filterAllReports();
+                } else {
+                    displayAllReportsTable(allReports);
+                }
+            } else {
+                showNotification('Не удалось обновить статус проверки: ' + (response.error || 'Неизвестная ошибка'), 'error');
+            }
+        } catch (error) {
+            showNotification('Ошибка при обновлении статуса проверки: ' + error.message, 'error');
+        }
+    }
+
     function filterAllReports() {
+        const searchInput = document.getElementById('searchAllReports');
+        const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+
         const filteredReports = allReports.filter(report =>
             (report.foreman_name && report.foreman_name.toLowerCase().includes(searchTerm)) ||
             (report.foreman_position && report.foreman_position.toLowerCase().includes(searchTerm)) ||

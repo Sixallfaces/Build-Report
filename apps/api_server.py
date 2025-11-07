@@ -178,6 +178,23 @@ async def ensure_report_folder(db, foreman_id: Optional[int], report_date: str) 
 
     return publish_yandex_folder(foreman_folder_path)
 
+async def ensure_work_reports_verification_column():
+    """Гарантирует наличие колонки is_verified в таблице work_reports."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("PRAGMA table_info(work_reports)") as cursor:
+                columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'is_verified' not in columns:
+                await db.execute(
+                    "ALTER TABLE work_reports ADD COLUMN is_verified INTEGER NOT NULL DEFAULT 0"
+                )
+                await db.commit()
+                logger.info("✅ Добавлена колонка is_verified в таблицу work_reports")
+    except Exception as exc:
+        logger.error(f"⚠️ Ошибка при добавлении колонки is_verified: {exc}")
+
+
 # Хэш-функция для паролей
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
@@ -1013,6 +1030,7 @@ async def get_all_reports_from_db(date_filter=None):
             query = '''
                 SELECT wr.id, wr.foreman_id, wr.work_id, wr.quantity,
                        wr.report_date, wr.report_time, wr.photo_report_url,
+                       wr.is_verified,
                        f.first_name as foreman_full_name,
                        f.last_name as foreman_position,
                        w.name as work_name, w.unit
@@ -1033,7 +1051,8 @@ async def get_all_reports_from_db(date_filter=None):
                 reports = []
                 for row in rows:
                     (report_id, foreman_id, work_id, quantity, report_date,
-                     report_time, photo_url, foreman_full_name, foreman_position, work_name, unit) = row
+                     report_time, photo_url, is_verified, foreman_full_name,
+                     foreman_position, work_name, unit) = row
                     reports.append({
                         'id': report_id,
                         'foreman_id': foreman_id,
@@ -1042,6 +1061,7 @@ async def get_all_reports_from_db(date_filter=None):
                         'report_date': report_date,
                         'report_time': report_time,
                         'photo_report_url': photo_url,
+                        'is_verified': bool(is_verified),
                         'foreman_name': foreman_full_name,
                         'foreman_position': foreman_position,
                         'work_name': work_name,
@@ -1060,6 +1080,7 @@ async def get_report_by_id(report_id: int):
             async with db.execute('''
                 SELECT wr.id, wr.foreman_id, wr.work_id, wr.quantity,
                        wr.report_date, wr.report_time, wr.photo_report_url,
+                       wr.is_verified,           
                        f.first_name as foreman_full_name,
                         f.last_name as foreman_position,
                        w.name as work_name, w.unit
@@ -1071,7 +1092,8 @@ async def get_report_by_id(report_id: int):
                 row = await cursor.fetchone()
                 if row:
                     (report_id, foreman_id, work_id, quantity, report_date,
-                     report_time, photo_url, foreman_full_name, foreman_position, work_name, unit) = row
+                     report_time, photo_url, is_verified, foreman_full_name,
+                     foreman_position, work_name, unit) = row
                     return {
                         'id': report_id,
                         'foreman_id': foreman_id,
@@ -1080,6 +1102,7 @@ async def get_report_by_id(report_id: int):
                         'report_date': report_date,
                         'report_time': report_time,
                         'photo_report_url': photo_url,
+                        'is_verified': bool(is_verified),
                         'foreman_name': foreman_full_name,
                         'foreman_position': foreman_position,
                         'work_name': work_name,
@@ -1219,21 +1242,41 @@ async def delete_report_from_db(report_id: int):
         await db.rollback()
         logger.error(f"❌ Ошибка удаления отчета ID {report_id}: {e}")
         return False, f"Ошибка удаления: {str(e)}"
+    
+async def set_report_verification_status(report_id: int, is_verified: bool) -> bool:
+    """Обновляет флаг проверки отчета."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute(
+                "UPDATE work_reports SET is_verified = ? WHERE id = ?",
+                (1 if is_verified else 0, report_id)
+            )
+            await db.commit()
+            if cursor.rowcount == 0:
+                logger.warning(f"⚠️ Не удалось найти отчет ID {report_id} для обновления статуса проверки")
+                return False
+            logger.info(
+                f"✅ Статус проверки отчета ID {report_id} обновлен на {'проверен' if is_verified else 'не проверен'}"
+            )
+            return True
+    except Exception as exc:
+        logger.error(f"❌ Ошибка обновления статуса проверки отчета ID {report_id}: {exc}")
+        return False    
 
 async def get_all_work_reports_from_db():
     """Получает все отчеты о работах для вкладки отчетов."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute('''
-                SELECT id, foreman_id, work_id, quantity, report_date, report_time, photo_report_url
-                FROM work_reports 
+                SELECT id, foreman_id, work_id, quantity, report_date, report_time, photo_report_url, is_verified
+                FROM work_reports
                 ORDER BY report_date DESC, report_time DESC
             ''') as cursor:
                 rows = await cursor.fetchall()
                 reports = []
                 for row in rows:
-                    (report_id, foreman_id, work_id, quantity, report_date, 
-                     report_time, photo_url) = row
+                    (report_id, foreman_id, work_id, quantity, report_date,
+                     report_time, photo_url, is_verified) = row
                     reports.append({
                         'id': report_id,
                         'foreman_id': foreman_id,
@@ -1241,7 +1284,8 @@ async def get_all_work_reports_from_db():
                         'quantity': quantity,
                         'report_date': report_date,
                         'report_time': report_time,
-                        'photo_report_url': photo_url
+                        'photo_report_url': photo_url,
+                        'is_verified': bool(is_verified)
                     })
                 return reports
     except Exception as e:
@@ -1499,6 +1543,7 @@ async def startup_event():
     await init_materials_table()
     await init_work_materials_table()
     await init_material_history_table()
+    await ensure_work_reports_verification_column()
 
 
 @app.get("/api/works/export")
@@ -1852,6 +1897,7 @@ async def startup_event():
     await init_categories_table()
     await init_materials_table()
     await init_work_materials_table()
+    await ensure_work_reports_verification_column()
 
 
 # Эндпоинты для работ
@@ -2414,6 +2460,48 @@ async def update_report(report_id: int, request: Request):
     except Exception as e:
         logger.error(f"❌ Ошибка при обновлении отчета ID {report_id}: {e}")
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
+
+@app.post("/api/report/{report_id}/verify")
+async def verify_report(report_id: int, request: Request):
+    """Обновляет статус проверки отчета."""
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Неверный формат JSON")
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Ожидается JSON-объект")
+
+    if 'is_verified' not in payload:
+        raise HTTPException(status_code=400, detail="Отсутствует поле is_verified")
+
+    raw_value = payload['is_verified']
+
+    if isinstance(raw_value, bool):
+        desired_status = raw_value
+    elif isinstance(raw_value, int):
+        desired_status = bool(raw_value)
+    elif isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in ("1", "true", "yes", "y", "on"):
+            desired_status = True
+        elif normalized in ("0", "false", "no", "n", "off"):
+            desired_status = False
+        else:
+            raise HTTPException(status_code=400, detail="Некорректное значение is_verified")
+    else:
+        raise HTTPException(status_code=400, detail="Некорректное значение is_verified")
+
+    if not await set_report_verification_status(report_id, desired_status):
+        raise HTTPException(status_code=404, detail="Отчет не найден")
+
+    return {
+        "success": True,
+        "data": {
+            "id": report_id,
+            "is_verified": desired_status
+        }
+    }
 
 @app.delete("/api/report/{report_id}")
 async def delete_report(report_id: int):
