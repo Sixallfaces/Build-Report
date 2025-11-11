@@ -2743,44 +2743,253 @@
     
     // Добавление новой работы
     function addNewWork() {
-        const tableBody = document.getElementById('worksTableBody');
-        
-        // Проверяем, есть ли уже строка "Нет данных"
-        if (tableBody.innerHTML.includes('Нет данных о работах')) {
-            tableBody.innerHTML = '';
+        const existingModal = document.getElementById('addWorkModal');
+        if (existingModal) {
+            existingModal.remove();
         }
-        
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td class="checkbox-cell">
-                <!-- Не добавляем чекбокс для новой работы, так как она еще не имеет ID -->
-            </td>
-            <td><input type="text" value="новый" readonly></td>
-            <td><input type="text" value="" class="editable" data-field="name"></td>
-            <td>
-                <select class="editable" data-field="category">
-                    ${categories.map(cat => `<option value="${cat.name}">${cat.name}</option>`).join('')}
-                </select>
-            </td>
-            <td>
-                <select class="editable" data-field="unit">
-                    ${UNITS.map(unit => `<option value="${unit}">${unit}</option>`).join('')}
-                </select>
-            </td>
-            <td><input type="number" value="0" class="editable" data-field="balance" step="1"></td>
-            <td><input type="number" value="0" class="editable" data-field="project_total" step="1"></td>
-            <td>
-                <select class="editable" data-field="is_active">
-                    <option value="1" selected>Да</option>
-                    <option value="0">Нет</option>
-                </select>
-            </td>
-            <td class="action-buttons">
-                <button onclick="saveNewWork(this)" class="success">➕ Создать</button>
-                <button onclick="removeNewWork(this)" class="danger">❌</button>
-            </td>
-        `;
-        tableBody.prepend(row);
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal';
+        overlay.id = 'addWorkModal';
+        overlay.style.display = 'flex';
+
+        const content = document.createElement('div');
+        content.className = 'modal-content';
+
+        const title = document.createElement('h3');
+        title.className = 'modal-title';
+        title.textContent = 'Добавление работ';
+
+        const subtitle = document.createElement('p');
+        subtitle.className = 'modal-subtitle';
+        subtitle.textContent = 'Заполните данные и добавьте одну или несколько работ.';
+
+        const form = document.createElement('form');
+        form.id = 'addWorkForm';
+
+        const itemsContainer = document.createElement('div');
+        itemsContainer.id = 'addWorkItemsContainer';
+        itemsContainer.style.display = 'flex';
+        itemsContainer.style.flexDirection = 'column';
+        itemsContainer.style.gap = '12px';
+
+        const addItemButton = document.createElement('button');
+        addItemButton.type = 'button';
+        addItemButton.className = 'secondary';
+        addItemButton.textContent = '➕ Добавить еще работу';
+
+        const actions = document.createElement('div');
+        actions.className = 'modal-actions';
+
+        const cancelButton = document.createElement('button');
+        cancelButton.type = 'button';
+        cancelButton.className = 'secondary';
+        cancelButton.textContent = 'Отмена';
+
+        const submitButton = document.createElement('button');
+        submitButton.type = 'submit';
+        submitButton.className = 'success';
+        submitButton.textContent = '💾 Сохранить';
+
+        actions.appendChild(cancelButton);
+        actions.appendChild(submitButton);
+
+        form.appendChild(itemsContainer);
+        form.appendChild(addItemButton);
+        form.appendChild(actions);
+
+        content.appendChild(title);
+        content.appendChild(subtitle);
+        content.appendChild(form);
+
+        overlay.appendChild(content);
+        document.body.appendChild(overlay);
+
+        const availableCategories = Array.isArray(categories) && categories.length > 0
+            ? categories.map(cat => cat.name)
+            : [''];
+        const availableUnits = Array.isArray(UNITS) && UNITS.length > 0
+            ? UNITS.slice()
+            : ['шт'];
+
+        function createSelectOptions(options, selectedValue = '') {
+            return options.map(option => {
+                const value = option ?? '';
+                const selected = value === selectedValue ? ' selected' : '';
+                return `<option value="${value}"${selected}>${value}</option>`;
+            }).join('');
+        }
+
+        function createWorkItem(initialData = {}) {
+            const item = document.createElement('div');
+            item.className = 'report-work-item add-work-item';
+
+            item.innerHTML = `
+                <div class="modal-form-group">
+                    <label>Наименование</label>
+                    <input type="text" class="editable" data-field="name" placeholder="Наименование работы" value="${initialData.name || ''}" required>
+                </div>
+                <div class="modal-form-group">
+                    <label>Раздел</label>
+                    <select class="editable" data-field="category"></select>
+                </div>
+                <div class="modal-form-group">
+                    <label>Единица измерения</label>
+                    <select class="editable" data-field="unit"></select>
+                </div>
+                <div class="modal-form-group">
+                    <label>На балансе</label>
+                    <input type="number" class="editable" data-field="balance" step="1" value="${initialData.balance ?? 0}">
+                </div>
+                <div class="modal-form-group">
+                    <label>Проект</label>
+                    <input type="number" class="editable" data-field="project_total" step="1" value="${initialData.project_total ?? 0}">
+                </div>
+                <div class="modal-form-group">
+                    <label>Активно</label>
+                    <select class="editable" data-field="is_active">
+                        <option value="1"${initialData.is_active === 0 ? '' : ' selected'}>Да</option>
+                        <option value="0"${initialData.is_active === 0 ? ' selected' : ''}>Нет</option>
+                    </select>
+                </div>
+                <button type="button" class="secondary remove-add-work-button">Удалить</button>
+            `;
+
+            const categorySelect = item.querySelector('select[data-field="category"]');
+            categorySelect.innerHTML = createSelectOptions(availableCategories, initialData.category || availableCategories[0] || '');
+
+            const unitSelect = item.querySelector('select[data-field="unit"]');
+            unitSelect.innerHTML = createSelectOptions(availableUnits, initialData.unit || availableUnits[0]);
+
+            const removeButton = item.querySelector('.remove-add-work-button');
+            removeButton.addEventListener('click', () => {
+                item.remove();
+                if (!itemsContainer.querySelector('.add-work-item')) {
+                    addWorkEntry();
+                }
+            });
+
+            return item;
+        }
+
+        function addWorkEntry(initialData = {}) {
+            const item = createWorkItem(initialData);
+            itemsContainer.appendChild(item);
+        }
+
+        addItemButton.addEventListener('click', () => addWorkEntry());
+        cancelButton.addEventListener('click', () => {
+            overlay.remove();
+        });
+
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) {
+                overlay.remove();
+            }
+        });
+
+        content.addEventListener('click', (event) => event.stopPropagation());
+
+        addWorkEntry();
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+
+            const items = Array.from(itemsContainer.querySelectorAll('.add-work-item'));
+            if (items.length === 0) {
+                showNotification('Добавьте хотя бы одну работу', 'error');
+                return;
+            }
+
+            const worksPayload = [];
+
+            for (const item of items) {
+                const getField = (selector) => item.querySelector(selector);
+
+                const nameInput = getField('input[data-field="name"]');
+                const categorySelect = getField('select[data-field="category"]');
+                const unitSelect = getField('select[data-field="unit"]');
+                const balanceInput = getField('input[data-field="balance"]');
+                const projectInput = getField('input[data-field="project_total"]');
+                const isActiveSelect = getField('select[data-field="is_active"]');
+
+                const name = (nameInput.value || '').trim();
+                if (!name) {
+                    showNotification('Наименование работы не может быть пустым', 'error');
+                    nameInput.focus();
+                    return;
+                }
+
+                worksPayload.push({
+                    name,
+                    category: (categorySelect?.value || '').trim(),
+                    unit: unitSelect?.value || '',
+                    balance: parseFloat(balanceInput?.value || '0') || 0,
+                    project_total: parseFloat(projectInput?.value || '0') || 0,
+                    is_active: parseInt(isActiveSelect?.value || '1', 10) || 0
+                });
+            }
+
+            submitButton.disabled = true;
+            cancelButton.disabled = true;
+            addItemButton.disabled = true;
+
+            let successCount = 0;
+            let errorMessages = [];
+
+            for (const workData of worksPayload) {
+                try {
+                    showNotification('Добавление работы...', 'success');
+
+                    const response = await fetch(buildApiUrl(API_CONFIG.ENDPOINTS.WORKS), {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        },
+                        body: JSON.stringify({
+                            name: workData.name,
+                            category: workData.category,
+                            unit: workData.unit,
+                            balance: workData.balance,
+                            project_total: workData.project_total,
+                            is_active: workData.is_active
+                        })
+                    });
+
+                    const workAdded = await checkIfWorkExists(workData.name, workData.category);
+
+                    if (workAdded) {
+                        successCount++;
+                        showNotification(`Работа "${workData.name}" успешно добавлена`, 'success');
+                    } else {
+                        let errorMessage = 'Работа не была добавлена в базе данных';
+                        try {
+                            const errorText = await response.text();
+                            if (errorText) {
+                                const errorData = JSON.parse(errorText);
+                                errorMessage = errorData.detail || errorData.error || errorMessage;
+                            }
+                        } catch (e) {}
+                        errorMessages.push(errorMessage);
+                    }
+                } catch (error) {
+                    errorMessages.push('Ошибка при добавлении работы: ' + error.message);
+                }
+            }
+
+            if (successCount > 0) {
+                overlay.remove();
+            } else {
+                submitButton.disabled = false;
+                cancelButton.disabled = false;
+                addItemButton.disabled = false;
+            }
+
+            if (errorMessages.length > 0) {
+                showNotification(errorMessages.join(' '), 'error');
+            }
+        });
     }
     
     // Удаление новой работы (если пользователь передумал)
