@@ -1230,74 +1230,143 @@ async def get_report_by_id(report_id: int):
         return None
 
 async def update_report_in_db(report_id: int, report_data: dict):
-    """Обновляет отчет в базе данных."""
+    """Обновляет отчет в базе данных вместе со всеми связанными остатками."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            # Получаем старые данные отчета для восстановления баланса
-            async with db.execute(
-                "SELECT work_id, quantity FROM work_reports WHERE id = ?", 
-                (report_id,)
-            ) as cursor:
-                old_row = await cursor.fetchone()
-                if not old_row:
-                    return False, "Отчет не найден"
-                
-                old_work_id, old_quantity = old_row
-            
-            # Восстанавливаем старый баланс
-            await db.execute(
-                "UPDATE works SET balance = balance + ? WHERE id = ?",
-                (old_quantity, old_work_id)
-            )
-            
-            # Проверяем новый баланс
-            async with db.execute(
-                "SELECT balance FROM works WHERE id = ?", 
-                (report_data['work_id'],)
-            ) as cursor:
-                new_balance_row = await cursor.fetchone()
-                if not new_balance_row:
-                    await db.rollback()
-                    return False, "Новая работа не найдена"
-                
-                new_balance = new_balance_row[0]
-                if new_balance < report_data['quantity']:
-                    await db.rollback()
-                    return False, "Недостаточно материалов на балансе для новой работы"
-            
-            auto_photo_url = report_data.get('photo_report_url')
-            if not auto_photo_url:
-                auto_photo_url = await ensure_report_folder(
-                    db,
-                    report_data.get('foreman_id'),
-                    report_data.get('report_date')
+            try:
+                await db.execute("BEGIN")
+
+                # Получаем старые данные отчета для восстановления балансов
+                async with db.execute(
+                    "SELECT work_id, quantity, foreman_id FROM work_reports WHERE id = ?",
+                    (report_id,)
+                ) as cursor:
+                    old_row = await cursor.fetchone()
+                    if not old_row:
+                        await db.rollback()
+                        return False, "Отчет не найден"
+
+                    old_work_id, old_quantity, old_foreman_id = old_row
+
+                # Определяем нового бригадира (если не передан, используем прежнего)
+                new_foreman_id_raw = report_data.get('foreman_id', old_foreman_id)
+                new_foreman_id = old_foreman_id
+                if new_foreman_id_raw is not None:
+                    try:
+                        new_foreman_id = int(new_foreman_id_raw)
+                    except (TypeError, ValueError):
+                        await db.rollback()
+                        return False, "Некорректный идентификатор бригадира"
+
+                new_foreman_display = await get_foreman_display_name(db, new_foreman_id)
+                old_foreman_display = await get_foreman_display_name(db, old_foreman_id)
+                correction_display = f"{old_foreman_display} (коррекция отчета ID {report_id})"
+
+                # Восстанавливаем баланс по старой работе
+                await db.execute(
+                    "UPDATE works SET balance = balance + ? WHERE id = ?",
+                    (old_quantity, old_work_id)
                 )
 
+                # Возвращаем материалы на склад по старой работе
+                old_requirements = await fetch_work_materials_requirements(db, old_work_id)
+                for requirement in old_requirements:
+                    total_to_restore = requirement['quantity_per_unit'] * old_quantity
+                    if total_to_restore <= 0:
+                        continue
+                    await db.execute(
+                        "UPDATE materials SET quantity = quantity + ? WHERE id = ?",
+                        (total_to_restore, requirement['material_id'])
+                    )
+                    await log_material_history_entry(
+                        db,
+                        requirement['material_id'],
+                        total_to_restore,
+                        'Возврат',
+                        correction_display,
+                        f"Возврат при редактировании отчета работы ID {report_id}"
+                    )
 
-            # Вычитаем новое количество из баланса
-            await db.execute(
-                "UPDATE works SET balance = balance - ? WHERE id = ?",
-                (report_data['quantity'], report_data['work_id'])
-            )
-            
-            # Обновляем отчет
-            await db.execute(
-                '''UPDATE work_reports
-                   SET work_id = ?, quantity = ?, report_date = ?,
-                       report_time = ?, photo_report_url = ?
-                   WHERE id = ?''',
-                (report_data['work_id'], report_data['quantity'],
-                 report_data['report_date'], report_data['report_time'],
-                 auto_photo_url or '', report_id)
-            )
-            
-            await db.commit()
-            logger.info(f"📝 Обновлен отчет ID: {report_id}")
-            return True, "Отчет успешно обновлен"
+
+            # Проверяем наличие работы и доступный баланс под новую работу
+                async with db.execute(
+                    "SELECT balance FROM works WHERE id = ?",
+                    (report_data['work_id'],)
+                ) as cursor:
+                    new_balance_row = await cursor.fetchone()
+                    if not new_balance_row:
+                        await db.rollback()
+                        return False, "Новая работа не найдена"
+
+                    new_balance = new_balance_row[0]
+                    if new_balance < report_data['quantity']:
+                        await db.rollback()
+                        return False, "Недостаточно материалов на балансе для новой работы"
+
+                new_requirements = await fetch_work_materials_requirements(db, report_data['work_id'])
+                for requirement in new_requirements:
+                    total_required = requirement['quantity_per_unit'] * report_data['quantity']
+                    if total_required <= 0:
+                        continue
+                    if requirement['available_quantity'] < total_required:
+                        await db.rollback()
+                        return False, (
+                            f"Недостаточно материала \"{requirement['material_name']}\" на складе"
+                        )
+
+                auto_photo_url = report_data.get('photo_report_url')
+                if not auto_photo_url:
+                    auto_photo_url = await ensure_report_folder(
+                        db,
+                        new_foreman_id,
+                        report_data.get('report_date')
+                    )
+
+                # Списываем новый объем работ
+                await db.execute(
+                    "UPDATE works SET balance = balance - ? WHERE id = ?",
+                    (report_data['quantity'], report_data['work_id'])
+                )
+
+                # Списываем материалы для новой работы
+                for requirement in new_requirements:
+                    total_required = requirement['quantity_per_unit'] * report_data['quantity']
+                    if total_required <= 0:
+                        continue
+                    await db.execute(
+                        "UPDATE materials SET quantity = quantity - ? WHERE id = ?",
+                        (total_required, requirement['material_id'])
+                    )
+                    await log_material_history_entry(
+                        db,
+                        requirement['material_id'],
+                        -total_required,
+                        'Списание',
+                        new_foreman_display,
+                        f"Списание по обновленному отчету работы ID {report_id}"
+                    )
+
+                # Обновляем сам отчет
+                await db.execute(
+                    '''UPDATE work_reports
+                       SET foreman_id = ?, work_id = ?, quantity = ?,
+                           report_date = ?, report_time = ?, photo_report_url = ?
+                       WHERE id = ?''',
+                    (new_foreman_id, report_data['work_id'], report_data['quantity'],
+                     report_data['report_date'], report_data['report_time'],
+                     auto_photo_url or '', report_id)
+                )
+
+                await db.commit()
+                logger.info(f"📝 Обновлен отчет ID: {report_id}")
+                return True, "Отчет успешно обновлен"
+            except Exception as e:
+                await db.rollback()
+                logger.error(f"❌ Ошибка обновления отчета ID {report_id}: {e}")
+                return False, f"Ошибка обновления: {str(e)}"
     except Exception as e:
-        await db.rollback()
-        logger.error(f"❌ Ошибка обновления отчета ID {report_id}: {e}")
-        return False, f"Ошибка обновления: {str(e)}"
+        logger.error(f"❌ Ошибка соединения при обновлении отчета ID {report_id}: {e}")
+        return False, "Ошибка соединения с базой данных"
 
 async def delete_report_from_db(report_id: int):
     """Удаляет отчет из базы данных и восстанавливает баланс."""
