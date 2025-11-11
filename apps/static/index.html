@@ -2172,11 +2172,12 @@
             });
         }
 
+        // Не закрываем модальное окно при клике на фон
         const modal = document.getElementById('workMaterialsModal');
         if (modal) {
             modal.addEventListener('click', event => {
                 if (event.target === modal) {
-                    closeWorkMaterialsModal();
+                    event.stopPropagation();
                 }
             });
         }
@@ -2225,11 +2226,12 @@
             });
         }
 
+        // Не закрываем модальное окно при клике на фон
         const modal = document.getElementById('sendReportModal');
         if (modal) {
             modal.addEventListener('click', event => {
                 if (event.target === modal) {
-                    closeSendReportModal();
+                    event.stopPropagation();
                 }
             });
         }
@@ -2654,11 +2656,12 @@
     }
 
     function initializeEditReportFeature() {
+        // Не закрываем модальное окно при клике на фон
         const modal = document.getElementById('editReportModal');
         if (modal) {
             modal.addEventListener('click', event => {
                 if (event.target === modal) {
-                    closeEditReportModal();
+                    event.stopPropagation();
                 }
             });
         }
@@ -5301,7 +5304,7 @@
                 <td><input type="text" value="${foreman.id}" readonly></td>
                 <td><input type="text" value="${foreman.full_name || ''}" class="editable" data-field="full_name"></td>
                 <td><input type="text" value="${foreman.position || ''}" class="editable" data-field="position"></td>
-                <td><input type="text" value="${foreman.username || ''}" class="editable" data-field="username"></td>
+                <td><input type="text" value="${foreman.username || ''}" readonly></td>
                 <td><input type="text" value="${foreman.registration_date || ''}" readonly></td>
                 <td>
                     <select class="editable" data-field="is_active">
