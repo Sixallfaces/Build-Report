@@ -4482,95 +4482,257 @@
     }
 
     function addNewMaterial() {
-        const tableBody = document.getElementById('materialsTableBody');
-        if (!tableBody) return;
-
-        if (tableBody.innerHTML.includes('Нет данных о материалах')) {
-            tableBody.innerHTML = '';
+        const existingModal = document.getElementById('addMaterialModal');
+        if (existingModal) {
+            existingModal.remove();
         }
 
-        const row = document.createElement('tr');
-        const categoryOptions = categories.length > 0
-            ? categories.map(cat => `<option value="${cat.name}">${cat.name}</option>`).join('')
-            : '<option value="">Не выбрано</option>';
+        const overlay = document.createElement('div');
+        overlay.className = 'modal';
+        overlay.id = 'addMaterialModal';
+        overlay.style.display = 'flex';
 
-        row.innerHTML = `
-            <td><input type="text" value="новый" readonly></td>
-            <td>
-                <select class="editable" data-field="category">
-                    ${categoryOptions}
-                </select>
-            </td>
-            <td><input type="text" class="editable" data-field="name" placeholder="Название материала"></td>
-            <td>
-                <select class="editable" data-field="unit">
-                    ${UNITS.map(unit => `<option value="${unit}">${unit}</option>`).join('')}
-                </select>
-            </td>
-            <td><input type="number" value="0" class="editable" data-field="quantity" step="1" min="0"></td>
-            <td class="action-buttons">
-                <button onclick="saveNewMaterial(this)" class="success">➕ Создать</button>
-                <button onclick="removeNewMaterial(this)" class="danger">❌</button>
-            </td>
-        `;
+        const content = document.createElement('div');
+        content.className = 'modal-content';
 
-        tableBody.prepend(row);
+        const title = document.createElement('h3');
+        title.className = 'modal-title';
+        title.textContent = 'Добавление материалов';
 
-        refreshTableSorting('materialsTable');
-    }
+        const subtitle = document.createElement('p');
+        subtitle.className = 'modal-subtitle';
+        subtitle.textContent = 'Заполните данные и добавьте один или несколько материалов.';
 
-    function removeNewMaterial(button) {
-        const row = button.closest('tr');
-        if (row) {
-            row.remove();
-        }
+        const form = document.createElement('form');
+        form.id = 'addMaterialForm';
 
-        const tableBody = document.getElementById('materialsTableBody');
-        if (tableBody && tableBody.children.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Нет данных о материалах</td></tr>';
-        }
-    }
+        const itemsContainer = document.createElement('div');
+        itemsContainer.id = 'addMaterialItemsContainer';
+        itemsContainer.style.display = 'flex';
+        itemsContainer.style.flexDirection = 'column';
+        itemsContainer.style.gap = '12px';
 
-    async function saveNewMaterial(button) {
-        const row = button.closest('tr');
-        const inputs = row.querySelectorAll('.editable');
+        const addItemButton = document.createElement('button');
+        addItemButton.type = 'button';
+        addItemButton.className = 'secondary';
+        addItemButton.textContent = '➕ Добавить еще материал';
 
-        const materialData = {};
-        inputs.forEach(input => {
-            const field = input.getAttribute('data-field');
-            materialData[field] = input.value;
-        });
+        const actions = document.createElement('div');
+        actions.className = 'modal-actions';
 
-        materialData.performed_by = getCurrentUsername();
+        const cancelButton = document.createElement('button');
+        cancelButton.type = 'button';
+        cancelButton.className = 'secondary';
+        cancelButton.textContent = 'Отмена';
 
-        if (!materialData.name || !materialData.category || !materialData.unit) {
-            showNotification('Заполните все обязательные поля для материала', 'error');
-            return;
-        }
+        const submitButton = document.createElement('button');
+        submitButton.type = 'submit';
+        submitButton.className = 'success';
+        submitButton.textContent = '💾 Сохранить';
 
-        materialData.quantity = parseFloat(materialData.quantity) || 0;
-        if (materialData.quantity < 0) {
-            showNotification('Количество не может быть отрицательным', 'error');
-            return;
-        }
+        actions.appendChild(cancelButton);
+        actions.appendChild(submitButton);
 
-        try {
-            const response = await makeApiRequest(API_CONFIG.ENDPOINTS.MATERIALS, {
-                method: 'POST',
-                body: JSON.stringify(materialData)
+        form.appendChild(itemsContainer);
+        form.appendChild(addItemButton);
+        form.appendChild(actions);
+
+        content.appendChild(title);
+        content.appendChild(subtitle);
+        content.appendChild(form);
+
+        overlay.appendChild(content);
+        document.body.appendChild(overlay);
+
+        const availableCategories = Array.isArray(categories) && categories.length > 0
+            ? categories.map(cat => cat.name).filter(Boolean)
+            : [];
+        const availableUnits = Array.isArray(UNITS) && UNITS.length > 0
+            ? UNITS.slice()
+            : ['шт'];
+
+        function populateSelect(select, options, selectedValue = '', placeholder = 'Не выбрано') {
+            const uniqueOptions = Array.from(new Set((options || [])
+                .map(option => (option ?? '').trim())
+                .filter(option => option)));
+
+            const parts = [];
+            if (placeholder) {
+                parts.push(`<option value=""${selectedValue ? '' : ' selected'}>${placeholder}</option>`);
+            }
+
+            uniqueOptions.forEach(option => {
+                const isSelected = option === selectedValue;
+                parts.push(`<option value="${option}"${isSelected ? ' selected' : ''}>${option}</option>`);
             });
 
-            if (response && response.success) {
-                showNotification('Материал успешно добавлен', 'success');
+            if (selectedValue && !uniqueOptions.includes(selectedValue)) {
+                parts.push(`<option value="${selectedValue}" selected>${selectedValue}</option>`);
+            }
+
+            select.innerHTML = parts.join('');
+        }
+
+        function createMaterialItem(initialData = {}) {
+            const item = document.createElement('div');
+            item.className = 'report-work-item add-material-item';
+
+            item.innerHTML = `
+                <div class="modal-form-group">
+                    <label>Категория</label>
+                    <select class="editable" data-field="category"></select>
+                </div>
+                <div class="modal-form-group">
+                    <label>Наименование</label>
+                    <input type="text" class="editable" data-field="name" placeholder="Название материала" value="${initialData.name || ''}" required>
+                </div>
+                <div class="modal-form-group">
+                    <label>Единица измерения</label>
+                    <select class="editable" data-field="unit"></select>
+                </div>
+                <div class="modal-form-group">
+                    <label>Количество</label>
+                    <input type="number" class="editable" data-field="quantity" step="1" min="0" value="${initialData.quantity ?? 0}">
+                </div>
+                <button type="button" class="secondary remove-add-material-button">Удалить</button>
+            `;
+
+            const categorySelect = item.querySelector('select[data-field="category"]');
+            populateSelect(categorySelect, availableCategories, initialData.category || '', 'Выберите категорию');
+
+            const unitSelect = item.querySelector('select[data-field="unit"]');
+            populateSelect(unitSelect, availableUnits, initialData.unit || '', 'Выберите единицу измерения');
+
+            const removeButton = item.querySelector('.remove-add-material-button');
+            removeButton.addEventListener('click', () => {
+                item.remove();
+                if (!itemsContainer.querySelector('.add-material-item')) {
+                    addMaterialEntry();
+                }
+            });
+
+            return item;
+        }
+
+        function addMaterialEntry(initialData = {}) {
+            const item = createMaterialItem(initialData);
+            itemsContainer.appendChild(item);
+        }
+
+        addItemButton.addEventListener('click', () => addMaterialEntry());
+        cancelButton.addEventListener('click', () => {
+            overlay.remove();
+        });
+
+        overlay.addEventListener('click', event => {
+            if (event.target === overlay) {
+                overlay.remove();
+            }
+        });
+
+        content.addEventListener('click', event => event.stopPropagation());
+
+        addMaterialEntry();
+
+        form.addEventListener('submit', async event => {
+            event.preventDefault();
+
+            const items = Array.from(itemsContainer.querySelectorAll('.add-material-item'));
+            if (items.length === 0) {
+                showNotification('Добавьте хотя бы один материал', 'error');
+                return;
+            }
+
+            const materialsPayload = [];
+
+            for (const item of items) {
+                const getField = selector => item.querySelector(selector);
+
+                const categorySelect = getField('select[data-field="category"]');
+                const nameInput = getField('input[data-field="name"]');
+                const unitSelect = getField('select[data-field="unit"]');
+                const quantityInput = getField('input[data-field="quantity"]');
+
+                const name = (nameInput?.value || '').trim();
+                const category = (categorySelect?.value || '').trim();
+                const unit = (unitSelect?.value || '').trim();
+                const quantity = parseFloat(quantityInput?.value || '0') || 0;
+
+                if (!category) {
+                    showNotification('Выберите категорию для материала', 'error');
+                    categorySelect.focus();
+                    return;
+                }
+
+                if (!name) {
+                    showNotification('Наименование материала не может быть пустым', 'error');
+                    nameInput.focus();
+                    return;
+                }
+
+                if (!unit) {
+                    showNotification('Выберите единицу измерения', 'error');
+                    unitSelect.focus();
+                    return;
+                }
+
+                if (quantity < 0) {
+                    showNotification('Количество не может быть отрицательным', 'error');
+                    quantityInput.focus();
+                    return;
+                }
+
+                materialsPayload.push({
+                    name,
+                    category,
+                    unit,
+                    quantity,
+                    performed_by: getCurrentUsername()
+                });
+            }
+
+            submitButton.disabled = true;
+            cancelButton.disabled = true;
+            addItemButton.disabled = true;
+
+            let successCount = 0;
+            const errorMessages = [];
+
+            for (const materialData of materialsPayload) {
+                try {
+                    showNotification(`Добавление материала "${materialData.name}"...`, 'success');
+
+                    const response = await makeApiRequest(API_CONFIG.ENDPOINTS.MATERIALS, {
+                        method: 'POST',
+                        body: JSON.stringify(materialData)
+                    });
+
+                    if (response && response.success) {
+                        successCount++;
+                    } else {
+                        const errorMessage = response?.detail || response?.error || 'Не удалось добавить материал';
+                        errorMessages.push(errorMessage);
+                    }
+                } catch (error) {
+                    errorMessages.push('Ошибка при добавлении материала: ' + error.message);
+                }
+            }
+
+            if (successCount > 0) {
                 materialHistoryLoaded = false;
                 await loadMaterials();
+                overlay.remove();
+                showNotification(`Материалов успешно добавлено: ${successCount}`, 'success');
             } else {
-                const errorMessage = response?.detail || response?.error || 'Не удалось добавить материал';
-                showNotification(errorMessage, 'error');
+                submitButton.disabled = false;
+                cancelButton.disabled = false;
+                addItemButton.disabled = false;
             }
-        } catch (error) {
-            showNotification('Ошибка при добавлении материала: ' + error.message, 'error');
-        }
+
+            if (errorMessages.length > 0) {
+                showNotification(errorMessages.join('\n'), 'error');
+            }
+        });
     }
 
     async function saveMaterial(materialId) {
