@@ -5102,7 +5102,90 @@
     }
     
     async function saveAllForemen() {
-        showNotification('Функция массового обновления бригадиров будет реализована в следующем обновлении', 'success');
+        const button = document.getElementById('saveAllForemen');
+        const rows = document.querySelectorAll('#foremenTableBody tr');
+
+        if (!rows.length) {
+            showNotification('Нет бригадиров для сохранения', 'error');
+            return;
+        }
+
+        if (button) {
+            button.disabled = true;
+        }
+
+        const updates = [];
+
+        rows.forEach(row => {
+            const idInput = row.querySelector('td:first-child input');
+            if (!idInput) {
+                return;
+            }
+
+            const foremanId = parseInt(idInput.value, 10);
+            if (!Number.isInteger(foremanId)) {
+                return;
+            }
+
+            const foremanData = { id: foremanId };
+            row.querySelectorAll('.editable').forEach(input => {
+                const field = input.getAttribute('data-field');
+                if (!field) {
+                    return;
+                }
+
+                let value = input.value;
+                if (field === 'is_active') {
+                    value = parseInt(value, 10);
+                }
+
+                foremanData[field] = value;
+            });
+
+            updates.push(foremanData);
+        });
+
+        if (!updates.length) {
+            if (button) {
+                button.disabled = false;
+            }
+            showNotification('Нет данных для сохранения', 'error');
+            return;
+        }
+
+        let successCount = 0;
+        const failedIds = [];
+
+        for (const foremanData of updates) {
+            try {
+                const response = await makeApiRequest(`${API_CONFIG.ENDPOINTS.FOREMEN}/${foremanData.id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify(foremanData)
+                });
+
+                if (response && response.success) {
+                    successCount += 1;
+                } else {
+                    failedIds.push(foremanData.id);
+                }
+            } catch (error) {
+                console.error('Bulk foreman update error:', error);
+                failedIds.push(foremanData.id);
+            }
+        }
+
+        if (button) {
+            button.disabled = false;
+        }
+
+        if (successCount > 0) {
+            await loadForemen();
+            showNotification(`Данные ${successCount} бригадиров сохранены`, 'success');
+        }
+
+        if (failedIds.length > 0) {
+            showNotification(`Ошибка сохранения для бригадиров: ${failedIds.join(', ')}`, 'error');
+        }
     }
     
     function filterForemen() {
