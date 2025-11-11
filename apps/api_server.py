@@ -1160,7 +1160,7 @@ async def get_all_reports_from_db(date_filter=None):
                 query += ' WHERE wr.report_date = ?'
                 params = (date_filter,)
                 
-            query += ' ORDER BY wr.report_date DESC, wr.report_time DESC'
+            query += " ORDER BY datetime(wr.report_date || ' ' || wr.report_time) DESC"
             
             async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
@@ -1455,7 +1455,7 @@ async def get_all_work_reports_from_db():
             async with db.execute('''
                 SELECT id, foreman_id, work_id, quantity, report_date, report_time, photo_report_url, is_verified
                 FROM work_reports
-                ORDER BY report_date DESC, report_time DESC
+                ORDER BY datetime(report_date || ' ' || report_time) DESC
             ''') as cursor:
                 rows = await cursor.fetchall()
                 reports = []
