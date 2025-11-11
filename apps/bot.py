@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import json
 import re
 import os
@@ -31,6 +32,7 @@ logger = logging.getLogger('telegram_bot')
 BOT_TOKEN = '8311513221:AAEO5oV-EnidielOmTI6fOUigaoRT4Z3OrQ'
 GOOGLE_SHEETS_CREDENTIALS = '/root/telegram-bot/buildreport-472507-3fcd421ee5fc.json'
 SPREADSHEET_ID = '13phAhf4kwXS8WeFnw0EhyiOC23mVZclm8Kz91-b8mh4'
+MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
 # Настройки Яндекс.Диска
 YANDEX_DISK_TOKEN = 'y0__xCK3sK_CBi_mDsg-J_i9BQLL_HZkMb3fig6Whe7-Yke5FYqDQ'
@@ -493,11 +495,13 @@ async def save_work_report(user_id: int, work_id: int, quantity: float, photo_re
     """Сохраняет отчет о выполненной работе в базе данных."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
+            moscow_now = datetime.now(MOSCOW_TZ)
+
             cursor = await db.execute(
                 "INSERT INTO work_reports (foreman_id, work_id, quantity, report_date, report_time, photo_report_url) VALUES (?, ?, ?, ?, ?, ?)",
                 (user_id, work_id, quantity,
-                 datetime.now().strftime('%Y-%m-%d'),
-                 datetime.now().strftime('%H:%M:%S'),
+                 moscow_now.strftime('%Y-%m-%d'),
+                 moscow_now.strftime('%H:%M:%S'),
                  photo_report_url)
             )
             await db.commit()
