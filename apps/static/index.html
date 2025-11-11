@@ -2643,10 +2643,17 @@
         selectAllCheckbox.checked = false;
         
         // Обработчик для "Выбрать все"
-        selectAllCheckbox.addEventListener('change', function() {
+        selectAllCheckbox.addEventListener('click', function(event) {
+            const shouldSelectAll = selectAllCheckbox.dataset.allSelected !== 'true';
+
             workCheckboxes.forEach(checkbox => {
-                checkbox.checked = this.checked;
+                checkbox.checked = shouldSelectAll;
             });
+
+            selectAllCheckbox.checked = shouldSelectAll;
+            selectAllCheckbox.indeterminate = false;
+            selectAllCheckbox.dataset.allSelected = shouldSelectAll ? 'true' : 'false';
+
             updateMassActions();
         });
         
@@ -2663,10 +2670,17 @@
                 deleteSelectedBtn.style.display = 'inline-block';
                 massActions.style.display = 'flex';
                 selectedCount.textContent = selectedCountValue;
-                selectAllCheckbox.checked = selectedCountValue === workCheckboxes.length;
+                const allSelected = selectedCountValue === workCheckboxes.length;
+                selectAllCheckbox.checked = allSelected;
+                selectAllCheckbox.indeterminate = !allSelected;
+                selectAllCheckbox.dataset.allSelected = allSelected ? 'true' : 'false';
             } else {
                 deleteSelectedBtn.style.display = 'none';
                 massActions.style.display = 'none';
+                selectedCount.textContent = '0';
+                selectAllCheckbox.checked = false;
+                selectAllCheckbox.indeterminate = false;
+                selectAllCheckbox.dataset.allSelected = 'false';
             }
         }
         
