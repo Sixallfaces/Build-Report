@@ -1268,11 +1268,11 @@
                     <table id="materialsTable">
                         <thead>
                             <tr>
-                                <th>ID</th>
-                                <th>Категория</th>
-                                <th>Наименование</th>
-                                <th>Ед. изм.</th>
-                                <th>Кол-во</th>
+                                <th class="sortable">ID</th>
+                                <th class="sortable">Категория</th>
+                                <th class="sortable">Наименование</th>
+                                <th class="sortable">Ед. изм.</th>
+                                <th class="sortable">Кол-во</th>
                                 <th>Действия</th>
                             </tr>
                         </thead>
@@ -1286,14 +1286,14 @@
                     <table id="materialHistoryTable">
                         <thead>
                             <tr>
-                                <th>ID</th>
-                                <th>Материал</th>
-                                <th>Действие</th>
-                                <th>Изменение</th>
-                                <th>Остаток</th>
-                                <th>Описание</th>
-                                <th>Кем</th>
-                                <th>Когда</th>
+                                <th class="sortable">ID</th>
+                                <th class="sortable">Материал</th>
+                                <th class="sortable">Действие</th>
+                                <th class="sortable">Изменение</th>
+                                <th class="sortable">Остаток</th>
+                                <th class="sortable">Описание</th>
+                                <th class="sortable">Кем</th>
+                                <th class="sortable">Когда</th>
                             </tr>
                         </thead>
                         <tbody id="materialHistoryTableBody"></tbody>
@@ -1339,12 +1339,12 @@
                     <table id="foremenTable">
                         <thead>
                             <tr>
-                                <th width="150">ID</th>
-                                <th>Фамилия и имя</th>
-                                <th>Должность</th>
-                                <th>Username</th>
-                                <th width="200">Дата регистрации</th>
-                                <th width="150">Доступ</th>
+                                <th class="sortable" width="150">ID</th>
+                                <th class="sortable">Фамилия и имя</th>
+                                <th class="sortable">Должность</th>
+                                <th class="sortable">Username</th>
+                                <th class="sortable" width="200">Дата регистрации</th>
+                                <th class="sortable" width="150">Доступ</th>
                                 <th width="200">Действия</th>
                             </tr>
                         </thead>
@@ -1372,13 +1372,13 @@
                     <table id="reportsTable">
                         <thead>
                             <tr>
-                                <th width="50">ID</th>
-                                <th width="100">ID бригадира</th>
-                                <th width="100">ID работы</th>
-                                <th width="100">Количество</th>
-                                <th width="120">Дата</th>
-                                <th width="120">Время</th>
-                                <th>Ссылка на фото</th>
+                                <th class="sortable" width="50">ID</th>
+                                <th class="sortable" width="100">ID бригадира</th>
+                                <th class="sortable" width="100">ID работы</th>
+                                <th class="sortable" width="100">Количество</th>
+                                <th class="sortable" width="120">Дата</th>
+                                <th class="sortable" width="120">Время</th>
+                                <th class="sortable">Ссылка на фото</th>
                                 <th width="150">Действия</th>
                             </tr>
                         </thead>
@@ -1406,12 +1406,12 @@
                     <table id="accumulativeTable">
                         <thead>
                             <tr>
-                                <th>Раздел</th>
-                                <th>Работа</th>
-                                <th>Единица измерения</th>
-                                <th>Количество</th>
-                                <th>Проект</th>
-                                <th>%Выполнения</th>
+                                <th class="sortable">Раздел</th>
+                                <th class="sortable">Работа</th>
+                                <th class="sortable">Единица измерения</th>
+                                <th class="sortable">Количество</th>
+                                <th class="sortable">Проект</th>
+                                <th class="sortable">%Выполнения</th>
                             </tr>
                         </thead>
                         <tbody id="accumulativeTableBody">
@@ -1437,14 +1437,14 @@
                     <table id="allReportsTable">
                         <thead>
                             <tr>
-                                <th width="50">ID</th>
-                                <th>Бригадир</th>
-                                <th>Должность</th>
-                                <th>Работа</th>
-                                <th width="100">Количество</th>
-                                <th width="120">Дата</th>
-                                <th width="120">Время</th>
-                                <th>Фото</th>
+                                <th class="sortable" width="50">ID</th>
+                                <th class="sortable">Бригадир</th>
+                                <th class="sortable">Должность</th>
+                                <th class="sortable">Работа</th>
+                                <th class="sortable" width="100">Количество</th>
+                                <th class="sortable" width="120">Дата</th>
+                                <th class="sortable" width="120">Время</th>
+                                <th class="sortable">Фото</th>
                                 <th width="150">Действия</th>
                             </tr>
                         </thead>
@@ -1518,10 +1518,383 @@
     let currentForemanSections = [];
     let currentEditingReportId = null;
 
-    // Переменные для сортировки
-    let currentSortColumn = -1;
-    let sortDirection = 0; // 0 - по умолчанию, 1 - по возрастанию, -1 - по убыванию
-    let originalWorksOrder = []; // Сохраняем исходный порядок
+    // Конфигурация сортировки таблиц
+    const tableSortStates = new Map();
+
+    const sortableTableConfigs = {
+        worksTable: {
+            columns: {
+                1: { type: 'number' },
+                2: { type: 'string' },
+                3: { type: 'string' },
+                4: { type: 'string' },
+                5: { type: 'number' },
+                6: { type: 'number' },
+                7: { type: 'boolean' }
+            },
+            getRowId: (row) => {
+                const input = row.querySelector('td:nth-child(2) input');
+                return input ? parseInt(input.value, 10) : null;
+            }
+        },
+        materialsTable: {
+            columns: {
+                0: { type: 'number' },
+                1: { type: 'string' },
+                2: { type: 'string' },
+                3: { type: 'string' },
+                4: { type: 'number' }
+            },
+            getRowId: (row) => {
+                const input = row.querySelector('td:first-child input');
+                return input ? parseInt(input.value, 10) : null;
+            }
+        },
+        materialHistoryTable: {
+            columns: {
+                0: { type: 'number' },
+                1: { type: 'string' },
+                2: { type: 'string' },
+                3: { type: 'number' },
+                4: { type: 'number' },
+                5: { type: 'string' },
+                6: { type: 'string' },
+                7: { type: 'date' }
+            }
+        },
+        foremenTable: {
+            columns: {
+                0: { type: 'number' },
+                1: { type: 'string' },
+                2: { type: 'string' },
+                3: { type: 'string' },
+                4: { type: 'date' },
+                5: { type: 'boolean' }
+            },
+            getRowId: (row) => {
+                const input = row.querySelector('td:first-child input');
+                return input ? parseInt(input.value, 10) : null;
+            }
+        },
+        reportsTable: {
+            columns: {
+                0: { type: 'number' },
+                1: { type: 'number' },
+                2: { type: 'number' },
+                3: { type: 'number' },
+                4: { type: 'date' },
+                5: { type: 'string' },
+                6: { type: 'string' }
+            }
+        },
+        accumulativeTable: {
+            columns: {
+                0: { type: 'string' },
+                1: { type: 'string' },
+                2: { type: 'string' },
+                3: { type: 'number' },
+                4: { type: 'number' },
+                5: { type: 'number' }
+            }
+        },
+        allReportsTable: {
+            columns: {
+                0: { type: 'number' },
+                1: { type: 'string' },
+                2: { type: 'string' },
+                3: { type: 'string' },
+                4: { type: 'number' },
+                5: { type: 'date' },
+                6: { type: 'string' },
+                7: { type: 'string' }
+            }
+        }
+    };
+
+    function refreshTableSorting(tableId) {
+        const config = sortableTableConfigs[tableId] || {};
+        const columnConfigs = config.columns || {};
+        const options = {};
+
+        if (typeof config.getRowId === 'function') {
+            options.getRowId = config.getRowId;
+        }
+
+        initializeSortableTable(tableId, columnConfigs, options);
+    }
+
+    function initializeSortableTable(tableId, columnConfigs = {}, options = {}) {
+        const table = document.getElementById(tableId);
+        if (!table) {
+            return;
+        }
+
+        const tbody = table.querySelector('tbody');
+        if (!tbody) {
+            return;
+        }
+
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+
+        rows.forEach((row, index) => {
+            if (typeof options.getRowId === 'function') {
+                const rowId = options.getRowId(row, index);
+                if (rowId !== null && rowId !== undefined && !Number.isNaN(rowId)) {
+                    row.dataset.sortId = rowId;
+                } else {
+                    delete row.dataset.sortId;
+                }
+            } else {
+                delete row.dataset.sortId;
+            }
+        });
+
+        const state = {
+            currentColumn: -1,
+            direction: 0,
+            columnConfigs,
+            getRowId: options.getRowId,
+            originalRows: rows.slice()
+        };
+
+        tableSortStates.set(tableId, state);
+
+        const headers = table.querySelectorAll('th.sortable');
+        headers.forEach(header => {
+            header.dataset.tableId = tableId;
+            header.dataset.columnIndex = header.cellIndex;
+            header.classList.remove('sorted-asc', 'sorted-desc', 'sorted-default');
+
+            if (header.dataset.sortListenerAttached !== 'true') {
+                header.addEventListener('click', handleTableSortClick);
+                header.dataset.sortListenerAttached = 'true';
+            }
+        });
+    }
+
+    function handleTableSortClick(event) {
+        const header = event.currentTarget;
+        const tableId = header.dataset.tableId;
+        const columnIndex = parseInt(header.dataset.columnIndex, 10);
+
+        if (Number.isNaN(columnIndex)) {
+            return;
+        }
+
+        sortTable(tableId, columnIndex);
+    }
+
+    function sortTable(tableId, columnIndex) {
+        const table = document.getElementById(tableId);
+        if (!table) {
+            return;
+        }
+
+        const tbody = table.querySelector('tbody');
+        if (!tbody) {
+            return;
+        }
+
+        const state = tableSortStates.get(tableId);
+        if (!state) {
+            return;
+        }
+
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const validRows = rows.filter(row => row.cells[columnIndex]);
+
+        if (validRows.length <= 1) {
+            return;
+        }
+
+        if (!state.originalRows || state.originalRows.length !== rows.length) {
+            state.originalRows = rows.slice();
+        }
+
+        if (state.currentColumn !== columnIndex) {
+            state.currentColumn = columnIndex;
+            state.direction = 1;
+        } else {
+            if (state.direction === 0) {
+                state.direction = 1;
+            } else if (state.direction === 1) {
+                state.direction = -1;
+            } else {
+                state.direction = 0;
+            }
+        }
+
+        if (state.direction === 0) {
+            state.originalRows.forEach(row => tbody.appendChild(row));
+            updateSortIndicators(tableId, columnIndex, state.direction);
+            tableSortStates.set(tableId, state);
+            return;
+        }
+
+        const columnConfig = state.columnConfigs[columnIndex] || {};
+        const sortedRows = validRows.slice().sort((a, b) =>
+            compareTableCells(a, b, columnIndex, columnConfig, state.direction)
+        );
+
+        sortedRows.forEach(row => tbody.appendChild(row));
+
+        // Добавляем обратно строки, которые не участвуют в сортировке (например, с colspan)
+        rows
+            .filter(row => !validRows.includes(row))
+            .forEach(row => tbody.appendChild(row));
+
+        updateSortIndicators(tableId, columnIndex, state.direction);
+        tableSortStates.set(tableId, state);
+    }
+
+    function compareTableCells(rowA, rowB, columnIndex, columnConfig, direction) {
+        const cellA = rowA.cells[columnIndex];
+        const cellB = rowB.cells[columnIndex];
+
+        const valueA = getCellSortValue(cellA, columnConfig);
+        const valueB = getCellSortValue(cellB, columnConfig);
+
+        let result;
+
+        switch (columnConfig.type) {
+            case 'number':
+                result = parseNumber(valueA) - parseNumber(valueB);
+                break;
+            case 'boolean':
+                result = parseBoolean(valueA) - parseBoolean(valueB);
+                break;
+            case 'date':
+                result = parseDate(valueA) - parseDate(valueB);
+                break;
+            default:
+                result = String(valueA ?? '').localeCompare(String(valueB ?? ''), 'ru', {
+                    sensitivity: 'base',
+                    numeric: false
+                });
+        }
+
+        if (result === 0) {
+            const fallbackA = rowA.dataset && rowA.dataset.sortId
+                ? parseInt(rowA.dataset.sortId, 10)
+                : rowA.rowIndex;
+            const fallbackB = rowB.dataset && rowB.dataset.sortId
+                ? parseInt(rowB.dataset.sortId, 10)
+                : rowB.rowIndex;
+            result = fallbackA - fallbackB;
+        }
+
+        return result * direction;
+    }
+
+    function getCellSortValue(cell, columnConfig) {
+        if (!cell) {
+            return '';
+        }
+
+        if (columnConfig && typeof columnConfig.getValue === 'function') {
+            return columnConfig.getValue(cell);
+        }
+
+        if (cell.dataset && cell.dataset.sortValue !== undefined) {
+            return cell.dataset.sortValue;
+        }
+
+        const formElement = cell.querySelector('input, select, textarea');
+        if (formElement) {
+            return formElement.value;
+        }
+
+        return cell.textContent.trim();
+    }
+
+    function parseNumber(value) {
+        if (typeof value === 'number') {
+            return Number.isFinite(value) ? value : 0;
+        }
+
+        if (typeof value === 'string') {
+            const normalized = value
+                .replace(/\u00A0/g, ' ')
+                .replace(/\s+/g, '')
+                .replace(',', '.');
+            const cleaned = normalized.replace(/[^0-9+\-\.]/g, '');
+            const parsed = parseFloat(cleaned);
+            return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : 0;
+    }
+
+    function parseBoolean(value) {
+        if (typeof value === 'boolean') {
+            return value ? 1 : 0;
+        }
+
+        if (typeof value === 'number') {
+            return value ? 1 : 0;
+        }
+
+        const normalized = String(value || '')
+            .toLowerCase()
+            .trim();
+
+        if (['1', 'true', 'да', 'yes', 'активно', '✅ доступен'].includes(normalized)) {
+            return 1;
+        }
+
+        return 0;
+    }
+
+    function parseDate(value) {
+        if (!value) {
+            return 0;
+        }
+
+        if (value instanceof Date) {
+            return value.getTime();
+        }
+
+        if (typeof value === 'number') {
+            return value;
+        }
+
+        if (typeof value === 'string') {
+            const normalized = value.replace(' ', 'T');
+            const timestamp = Date.parse(normalized);
+            return Number.isNaN(timestamp) ? 0 : timestamp;
+        }
+
+        return 0;
+    }
+
+    function updateSortIndicators(tableId, columnIndex, direction) {
+        const table = document.getElementById(tableId);
+        if (!table) {
+            return;
+        }
+
+        const headers = table.querySelectorAll('th.sortable');
+        headers.forEach(header => {
+            header.classList.remove('sorted-asc', 'sorted-desc', 'sorted-default');
+        });
+
+        const targetHeader = Array.from(headers).find(header =>
+            parseInt(header.dataset.columnIndex, 10) === columnIndex
+        );
+
+        if (!targetHeader) {
+            return;
+        }
+
+        if (direction === 1) {
+            targetHeader.classList.add('sorted-asc');
+        } else if (direction === -1) {
+            targetHeader.classList.add('sorted-desc');
+        } else {
+            targetHeader.classList.add('sorted-default');
+        }
+    }
 
     // Переменные для модального окна добавления баланса
     let currentWorkIdForBalance = null;
@@ -2681,8 +3054,6 @@
             
             if (data.success) {
                 works = data.data || [];
-                // Сохраняем исходный порядок
-                originalWorksOrder = [...works];
                 displayWorks(works);
             } else {
                 showNotification('Ошибка при загрузке работ: ' + data.error, 'error');
@@ -2701,6 +3072,7 @@
         
         if (worksToDisplay.length === 0) {
             tableBody.innerHTML = '<tr><td colspan="9" style="text-align: center;">Нет данных о работах</td></tr>';
+            refreshTableSorting('worksTable');
             return;
         }
         
@@ -2747,7 +3119,7 @@
         });
 
         initializeWorkCheckboxes();
-        addSortingToWorksTable();
+        refreshTableSorting('worksTable');
     }
 
     function populateWorkMaterialSelect() {
@@ -2997,94 +3369,7 @@
     }
 
     // ФУНКЦИИ СОРТИРОВКИ
-    function addSortingToWorksTable() {
-        const headers = document.querySelectorAll('#worksTable th.sortable');
-        headers.forEach((header, index) => {
-            header.addEventListener('click', () => sortWorksTable(index + 1)); // +1 потому что первая колонка - чекбокс
-        });
-    }
-
-    function sortWorksTable(columnIndex) {
-        const table = document.getElementById('worksTable');
-        const tbody = table.querySelector('tbody');
-        
-        // Если кликаем по другой колонке - сбрасываем состояние
-        if (currentSortColumn !== columnIndex) {
-            currentSortColumn = columnIndex;
-            sortDirection = 1; // Начинаем с сортировки по возрастанию
-        } else {
-            // Циклически меняем направление: 0 -> 1 -> -1 -> 0
-            if (sortDirection === 0) {
-                sortDirection = 1;
-            } else if (sortDirection === 1) {
-                sortDirection = -1;
-            } else {
-                sortDirection = 0;
-            }
-        }
-        
-        let rows = Array.from(tbody.querySelectorAll('tr'));
-        
-        if (sortDirection === 0) {
-            // Возвращаем исходный порядок
-            rows.sort((a, b) => {
-                const aId = parseInt(a.cells[1].querySelector('input').value);
-                const bId = parseInt(b.cells[1].querySelector('input').value);
-                return originalWorksOrder.findIndex(w => w.id === aId) - originalWorksOrder.findIndex(w => w.id === bId);
-            });
-        } else {
-            // Сортируем строки
-            rows.sort((a, b) => {
-                const aCell = a.cells[columnIndex];
-                const bCell = b.cells[columnIndex];
-                
-                let aValue = aCell.querySelector('input, select').value;
-                let bValue = bCell.querySelector('input, select').value;
-                
-                // Для числовых колонок (ID, Баланс, Проект)
-                if (columnIndex === 1 || columnIndex === 5 || columnIndex === 6) {
-                    aValue = parseFloat(aValue) || 0;
-                    bValue = parseFloat(bValue) || 0;
-                    return (aValue - bValue) * sortDirection;
-                }
-                
-                // Для булевых значений (Активно)
-                if (columnIndex === 7) {
-                    aValue = aValue === 'Да' ? 1 : 0;
-                    bValue = bValue === 'Да' ? 1 : 0;
-                    return (aValue - bValue) * sortDirection;
-                }
-                
-                // Для текстовых колонок
-                return aValue.localeCompare(bValue) * sortDirection;
-            });
-        }
-        
-        // Очищаем и перезаполняем tbody
-        tbody.innerHTML = '';
-        rows.forEach(row => tbody.appendChild(row));
-        
-        // Обновляем индикаторы сортировки
-        updateSortIndicators(columnIndex);
-    }
-
-    function updateSortIndicators(columnIndex) {
-        const headers = document.querySelectorAll('#worksTable th.sortable');
-        headers.forEach(header => {
-            header.classList.remove('sorted-asc', 'sorted-desc', 'sorted-default');
-        });
-        
-        const currentHeader = headers[columnIndex - 1]; // -1 потому что первая колонка - чекбокс
-        if (currentHeader) {
-            if (sortDirection === 1) {
-                currentHeader.classList.add('sorted-asc');
-            } else if (sortDirection === -1) {
-                currentHeader.classList.add('sorted-desc');
-            } else {
-                currentHeader.classList.add('sorted-default');
-            }
-        }
-    }
+    
     
     // Инициализация чекбоксов для выбора работ
     function initializeWorkCheckboxes() {
@@ -3929,6 +4214,7 @@
 
         if (!materialsToDisplay || materialsToDisplay.length === 0) {
             tableBody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Нет данных о материалах</td></tr>';
+            refreshTableSorting('materialsTable');
             return;
         }
 
@@ -3980,6 +4266,8 @@
 
             tableBody.appendChild(row);
         });
+
+        refreshTableSorting('materialsTable');
     }
 
     async function loadMaterialHistory(forceReload = false) {
@@ -4061,24 +4349,34 @@
 
         if (!historyToDisplay || historyToDisplay.length === 0) {
             tableBody.innerHTML = '<tr><td colspan="8" style="text-align: center;">Нет данных об истории материалов</td></tr>';
+            refreshTableSorting('materialHistoryTable');
             return;
         }
 
         historyToDisplay.forEach(entry => {
             const row = document.createElement('tr');
             const unit = entry.unit || '';
+            const changeValue = Number(entry.change_amount);
+            const resultingValue = Number(entry.resulting_quantity);
+            const changeSortValue = Number.isFinite(changeValue) ? changeValue : '';
+            const resultingSortValue = Number.isFinite(resultingValue) ? resultingValue : '';
+            const dateSortValue = entry.created_at
+                ? String(entry.created_at).replace(' ', 'T')
+                : '';
             row.innerHTML = `
                 <td>${entry.id ?? ''}</td>
                 <td>${entry.material_name || '-'}</td>
                 <td>${entry.change_type || '-'}</td>
-                <td>${formatHistoryChange(entry.change_amount, unit)}</td>
-                <td>${formatHistoryNumber(entry.resulting_quantity, unit)}</td>
+                <td data-sort-value="${changeSortValue}">${formatHistoryChange(entry.change_amount, unit)}</td>
+                <td data-sort-value="${resultingSortValue}">${formatHistoryNumber(entry.resulting_quantity, unit)}</td>
                 <td>${entry.description || ''}</td>
                 <td>${entry.performed_by || ''}</td>
-                <td>${formatHistoryDate(entry.created_at)}</td>
+                <td data-sort-value="${dateSortValue}">${formatHistoryDate(entry.created_at)}</td>
             `;
             tableBody.appendChild(row);
         });
+
+        refreshTableSorting('materialHistoryTable');
     }
 
     function filterMaterialHistory(query) {
@@ -4217,6 +4515,8 @@
         `;
 
         tableBody.prepend(row);
+
+        refreshTableSorting('materialsTable');
     }
 
     function removeNewMaterial(button) {
@@ -4829,6 +5129,7 @@
         
         if (foremenToDisplay.length === 0) {
             tableBody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Нет данных о бригадирах</td></tr>';
+            refreshTableSorting('foremenTable');
             return;
         }
 
@@ -4854,6 +5155,8 @@
             `;
             tableBody.appendChild(row);
         });
+
+        refreshTableSorting('foremenTable');
     }
 
     async function openForemanSections(foremanId) {
@@ -5220,11 +5523,14 @@
     function displayReports(reportsToDisplay) {
         const tableBody = document.getElementById('reportsTableBody');
         tableBody.innerHTML = '';
-        
+
         if (reportsToDisplay.length === 0) {
             tableBody.innerHTML = '<tr><td colspan="8" style="text-align: center;">Нет данных об отчетах</td></tr>';
+            refreshTableSorting('reportsTable');
             return;
         }
+
+        refreshTableSorting('reportsTable');
     }
     
     function addNewReport() {
@@ -5275,21 +5581,27 @@
         
         if (data.length === 0) {
             tableBody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Нет данных</td></tr>';
+            refreshTableSorting('accumulativeTable');
             return;
         }
-        
+
         data.forEach(item => {
             const row = document.createElement('tr');
+            const quantityValue = Number(item.Количество);
+            const projectValue = Number(item.Проект);
+            const percentValue = Number(item['%Выполнения']);
             row.innerHTML = `
                 <td>${item.Категория}</td>
                 <td>${item.Работа}</td>
                 <td>${item['Единица измерения']}</td>
-                <td>${item.Количество}</td>
-                <td>${item.Проект}</td>
-                <td>${item['%Выполнения']}%</td>
+                <td data-sort-value="${Number.isFinite(quantityValue) ? quantityValue : ''}">${item.Количество}</td>
+                <td data-sort-value="${Number.isFinite(projectValue) ? projectValue : ''}">${item.Проект}</td>
+                <td data-sort-value="${Number.isFinite(percentValue) ? percentValue : ''}">${item['%Выполнения']}%</td>
             `;
             tableBody.appendChild(row);
         });
+
+        refreshTableSorting('accumulativeTable');
     }
 
     function filterAccumulative() {
@@ -5376,6 +5688,7 @@
         
         if (reportsToDisplay.length === 0) {
             tableBody.innerHTML = '<tr><td colspan="9" style="text-align: center;">Нет данных об отчетах</td></tr>';
+            refreshTableSorting('allReportsTable');
             return;
         }
 
@@ -5389,14 +5702,18 @@
             const verifyButtonLabel = isVerified ? '✅' : 'Проверить';
             const verifyButtonTitle = isVerified ? 'Отчет подтвержден' : 'Отметить отчет как проверенный';
 
+            const quantityValue = Number(report.quantity);
+            const dateSortValue = report.report_date
+                ? String(report.report_date).replace(' ', 'T')
+                : '';
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${report.id}</td>
                 <td>${report.foreman_name || 'Неизвестно'}</td>
                 <td>${report.foreman_position || '—'}</td>
                 <td>${report.work_name || 'Неизвестно'}</td>
-                <td>${report.quantity} ${report.unit || 'шт'}</td>
-                <td>${report.report_date}</td>
+                <td data-sort-value="${Number.isFinite(quantityValue) ? quantityValue : ''}">${report.quantity} ${report.unit || 'шт'}</td>
+                <td data-sort-value="${dateSortValue}">${report.report_date}</td>
                 <td>${report.report_time}</td>
                 <td>${photoLink}</td>
                 <td class="action-buttons">
@@ -5407,6 +5724,8 @@
             `;
             tableBody.appendChild(row);
         });
+
+        refreshTableSorting('allReportsTable');
     }
     
     async function deleteReport(reportId) {
