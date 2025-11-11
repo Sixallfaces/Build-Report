@@ -1232,8 +1232,8 @@
                                     <input type="checkbox" id="selectAllWorks">
                                 </th>
                                 <th class="sortable">ID</th>
+                                <th class="sortable">Разделы</th>
                                 <th class="sortable">Наименование</th>
-                                <th class="sortable">Раздел</th>
                                 <th class="sortable">Ед.изм.</th>
                                 <th class="sortable">На балансе</th>
                                 <th class="sortable">Проект</th>
@@ -3083,15 +3083,15 @@
                     <input type="checkbox" class="work-checkbox" value="${work.id}">
                 </td>
                 <td><input type="text" value="${work.id}" readonly></td>
-                <td><input type="text" value="${work['Название работы']}" class="editable" data-field="name"></td>
                 <td>
                     <select class="editable" data-field="category">
-                        ${categories.map(cat => 
+                        ${categories.map(cat =>
                             `<option value="${cat.name}" ${cat.name === work.Категория ? 'selected' : ''}>${cat.name}</option>`
                         ).join('')}
                         <option value="${work.Категория}" ${!categories.find(c => c.name === work.Категория) ? 'selected' : ''}>${work.Категория}</option>
                     </select>
                 </td>
+                <td><input type="text" value="${work['Название работы']}" class="editable" data-field="name"></td>
                 <td>
                     <select class="editable" data-field="unit">
                         ${UNITS.map(unit => 
