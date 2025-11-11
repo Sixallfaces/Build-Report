@@ -1128,6 +1128,60 @@
         </div>
     </div>
 
+    <div id="editReportModal" class="modal">
+        <div class="modal-content">
+            <h3 class="modal-title">Редактировать отчет</h3>
+            <p class="modal-subtitle">Измените данные отчета и сохраните изменения</p>
+
+            <form id="editReportForm">
+                <div id="editReportError" class="modal-alert" style="display: none;"></div>
+
+                <div class="modal-form-group">
+                    <label for="editReportForemanSelect">Бригадир</label>
+                    <select id="editReportForemanSelect" required>
+                        <option value="">Выберите бригадира</option>
+                    </select>
+                </div>
+
+                <div class="modal-form-group">
+                    <label for="editReportWorkSelect">Работа</label>
+                    <select id="editReportWorkSelect" required>
+                        <option value="">Выберите работу</option>
+                    </select>
+                    <p id="editReportWorkDetails" class="modal-note">Выберите работу, чтобы увидеть детали.</p>
+                </div>
+
+                <div class="modal-form-group">
+                    <label for="editReportQuantity">Количество</label>
+                    <div class="quantity-input-wrapper">
+                        <input type="number" id="editReportQuantity" class="report-work-quantity" min="0" step="0.01" placeholder="Количество" required>
+                        <span id="editReportWorkUnit" class="report-work-unit"></span>
+                    </div>
+                </div>
+
+                <div class="modal-form-group">
+                    <label for="editReportDate">Дата отчета</label>
+                    <input type="date" id="editReportDate" required>
+                </div>
+
+                <div class="modal-form-group">
+                    <label for="editReportTime">Время отчета</label>
+                    <input type="time" id="editReportTime" step="1" required>
+                </div>
+
+                <div class="modal-form-group">
+                    <label for="editReportPhoto">Ссылка на фотоотчет (необязательно)</label>
+                    <input type="url" id="editReportPhoto" placeholder="https://">
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" id="cancelEditReportButton" class="secondary">Отмена</button>
+                    <button type="submit" id="saveEditReportButton" class="success">💾 Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- ОСНОВНОЙ КОНТЕНТ (скрыт до авторизации) -->
     <div id="mainContent" style="display: none;">
         <div class="container">
@@ -1462,6 +1516,7 @@
     let isMaterialHistoryView = false;
     let currentForemanIdForSections = null;
     let currentForemanSections = [];
+    let currentEditingReportId = null;
 
     // Переменные для сортировки
     let currentSortColumn = -1;
@@ -1686,6 +1741,7 @@
         initializeReportsTab();
         initializeAllReportsTab();
         initializeSendReportFeature();
+        initializeEditReportFeature();
         initializeAccumulativeTab();
 
         // Загрузка данных
@@ -2220,6 +2276,392 @@
         } finally {
             if (submitButton) {
                 submitButton.disabled = false;
+            }
+        }
+    }
+
+    function initializeEditReportFeature() {
+        const modal = document.getElementById('editReportModal');
+        if (modal) {
+            modal.addEventListener('click', event => {
+                if (event.target === modal) {
+                    closeEditReportModal();
+                }
+            });
+        }
+
+        const cancelButton = document.getElementById('cancelEditReportButton');
+        if (cancelButton) {
+            cancelButton.addEventListener('click', closeEditReportModal);
+        }
+
+        const workSelect = document.getElementById('editReportWorkSelect');
+        if (workSelect) {
+            workSelect.addEventListener('change', () => {
+                const selectedId = parseInt(workSelect.value, 10);
+                updateEditReportWorkDetails(Number.isInteger(selectedId) ? selectedId : null);
+            });
+        }
+
+        const form = document.getElementById('editReportForm');
+        if (form) {
+            form.addEventListener('submit', submitEditReportForm);
+        }
+    }
+
+    function showEditReportError(message) {
+        const errorElement = document.getElementById('editReportError');
+        if (!errorElement) {
+            return;
+        }
+
+        if (message) {
+            errorElement.textContent = message;
+            errorElement.style.display = 'block';
+        } else {
+            errorElement.textContent = '';
+            errorElement.style.display = 'none';
+        }
+    }
+
+    function closeEditReportModal() {
+        const modal = document.getElementById('editReportModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+
+        const form = document.getElementById('editReportForm');
+        if (form) {
+            form.reset();
+        }
+
+        showEditReportError('');
+        currentEditingReportId = null;
+
+        const unitElement = document.getElementById('editReportWorkUnit');
+        if (unitElement) {
+            unitElement.textContent = '';
+        }
+
+        const detailsElement = document.getElementById('editReportWorkDetails');
+        if (detailsElement) {
+            detailsElement.textContent = 'Выберите работу, чтобы увидеть детали.';
+        }
+    }
+
+    function populateEditReportForemanSelect(selectedId) {
+        const select = document.getElementById('editReportForemanSelect');
+        if (!select) {
+            return;
+        }
+
+        const availableForemen = (Array.isArray(foremen) ? foremen : [])
+            .filter(item => item && (item.is_active === undefined || item.is_active));
+
+        if (availableForemen.length === 0) {
+            select.innerHTML = '<option value="">Нет доступных бригадиров</option>';
+            select.disabled = true;
+            return;
+        }
+
+        const options = ['<option value="">Выберите бригадира</option>'].concat(
+            availableForemen
+                .slice()
+                .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
+                .map(item => {
+                    const position = item.position ? ` • ${item.position}` : '';
+                    return `<option value="${item.id}">${item.full_name || item.id}${position}</option>`;
+                })
+        );
+
+        select.innerHTML = options.join('');
+        select.disabled = false;
+
+        if (selectedId) {
+            select.value = String(selectedId);
+            if (select.value !== String(selectedId)) {
+                select.value = '';
+            }
+        }
+    }
+
+    function populateEditReportWorkSelect(selectedId) {
+        const select = document.getElementById('editReportWorkSelect');
+        if (!select) {
+            return;
+        }
+
+        const availableWorks = (Array.isArray(works) ? works : [])
+            .filter(item => item && (item.is_active === undefined ? true : Boolean(item.is_active)));
+
+        if (availableWorks.length === 0) {
+            select.innerHTML = '<option value="">Нет доступных работ</option>';
+            select.disabled = true;
+            return;
+        }
+
+        const options = ['<option value="">Выберите работу</option>'].concat(
+            availableWorks
+                .slice()
+                .sort((a, b) => (a['Название работы'] || '').localeCompare(b['Название работы'] || ''))
+                .map(item => {
+                    const category = item['Категория'] ? ` • ${item['Категория']}` : '';
+                    return `<option value="${item.id}">${item['Название работы'] || item.id}${category}</option>`;
+                })
+        );
+
+        select.innerHTML = options.join('');
+        select.disabled = false;
+
+        if (selectedId) {
+            select.value = String(selectedId);
+            if (select.value !== String(selectedId)) {
+                select.value = '';
+            }
+        }
+    }
+
+    function updateEditReportWorkDetails(workId) {
+        const detailsElement = document.getElementById('editReportWorkDetails');
+        const unitElement = document.getElementById('editReportWorkUnit');
+        const quantityInput = document.getElementById('editReportQuantity');
+
+        if (!Number.isInteger(workId)) {
+            if (detailsElement) {
+                detailsElement.textContent = 'Выберите работу, чтобы увидеть детали.';
+            }
+            if (unitElement) {
+                unitElement.textContent = '';
+            }
+            if (quantityInput) {
+                quantityInput.placeholder = 'Количество';
+            }
+            return;
+        }
+
+        const work = Array.isArray(works) ? works.find(item => item && item.id === workId) : null;
+        if (!work) {
+            if (detailsElement) {
+                detailsElement.textContent = 'Не удалось найти данные о выбранной работе.';
+            }
+            if (unitElement) {
+                unitElement.textContent = '';
+            }
+            if (quantityInput) {
+                quantityInput.placeholder = 'Количество';
+            }
+            return;
+        }
+
+        const unit = work['Единица измерения'] || 'шт';
+        const balanceRaw = work['На балансе'];
+        const balanceNumber = typeof balanceRaw === 'number' ? balanceRaw : parseFloat(balanceRaw);
+        const formattedBalance = Number.isFinite(balanceNumber)
+            ? balanceNumber.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+            : (balanceRaw || '0');
+        const category = work['Категория'] || '—';
+
+        if (detailsElement) {
+            detailsElement.textContent = `Раздел: ${category} • На балансе: ${formattedBalance} ${unit}`;
+        }
+
+        if (unitElement) {
+            unitElement.textContent = unit;
+        }
+
+        if (quantityInput) {
+            quantityInput.placeholder = `Количество (${unit})`;
+        }
+    }
+
+    async function editReport(reportId) {
+        const modal = document.getElementById('editReportModal');
+        if (!modal) {
+            showNotification('Окно редактирования недоступно', 'error');
+            return;
+        }
+
+        showEditReportError('');
+        currentEditingReportId = reportId;
+
+        const saveButton = document.getElementById('saveEditReportButton');
+        if (saveButton) {
+            saveButton.disabled = true;
+        }
+
+        try {
+            if (!Array.isArray(foremen) || foremen.length === 0) {
+                await loadForemen();
+            }
+
+            if (!Array.isArray(works) || works.length === 0) {
+                await loadWorks();
+            }
+        } catch (error) {
+            console.error('Не удалось обновить данные перед редактированием отчета:', error);
+        }
+
+        populateEditReportForemanSelect(null);
+        populateEditReportWorkSelect(null);
+        updateEditReportWorkDetails(null);
+
+        try {
+            const response = await makeApiRequest(`${API_CONFIG.ENDPOINTS.REPORT}/${reportId}`);
+
+            if (!response || !response.success || !response.data) {
+                const errorMessage = response?.error || response?.detail || 'Не удалось загрузить данные отчета';
+                showNotification(errorMessage, 'error');
+                currentEditingReportId = null;
+                return;
+            }
+
+            const reportData = response.data;
+
+            populateEditReportForemanSelect(reportData.foreman_id);
+            populateEditReportWorkSelect(reportData.work_id);
+
+            const workId = Number.isInteger(reportData.work_id) ? reportData.work_id : parseInt(reportData.work_id, 10);
+            updateEditReportWorkDetails(Number.isInteger(workId) ? workId : null);
+
+            const quantityInput = document.getElementById('editReportQuantity');
+            if (quantityInput) {
+                quantityInput.value = reportData.quantity ?? '';
+            }
+
+            const dateInput = document.getElementById('editReportDate');
+            if (dateInput) {
+                dateInput.value = reportData.report_date || '';
+            }
+
+            const timeInput = document.getElementById('editReportTime');
+            if (timeInput) {
+                const timeValue = (reportData.report_time || '').toString();
+                timeInput.value = timeValue.length > 8 ? timeValue.slice(0, 8) : timeValue;
+            }
+
+            const photoInput = document.getElementById('editReportPhoto');
+            if (photoInput) {
+                photoInput.value = reportData.photo_report_url || '';
+            }
+
+            const foremanSelect = document.getElementById('editReportForemanSelect');
+            if (foremanSelect && reportData.foreman_id) {
+                foremanSelect.value = String(reportData.foreman_id);
+                if (foremanSelect.value !== String(reportData.foreman_id)) {
+                    foremanSelect.value = '';
+                }
+            }
+
+            const workSelect = document.getElementById('editReportWorkSelect');
+            if (workSelect && reportData.work_id) {
+                workSelect.value = String(reportData.work_id);
+                if (workSelect.value !== String(reportData.work_id)) {
+                    workSelect.value = '';
+                }
+            }
+
+            modal.style.display = 'flex';
+        } catch (error) {
+            console.error('Ошибка загрузки отчета:', error);
+            showNotification('Ошибка при загрузке отчета: ' + error.message, 'error');
+            currentEditingReportId = null;
+        } finally {
+            if (saveButton) {
+                saveButton.disabled = false;
+            }
+        }
+    }
+
+    async function submitEditReportForm(event) {
+        event.preventDefault();
+
+        if (!currentEditingReportId) {
+            showNotification('Отчет для редактирования не выбран', 'error');
+            return;
+        }
+
+        const foremanSelect = document.getElementById('editReportForemanSelect');
+        const workSelect = document.getElementById('editReportWorkSelect');
+        const quantityInput = document.getElementById('editReportQuantity');
+        const dateInput = document.getElementById('editReportDate');
+        const timeInput = document.getElementById('editReportTime');
+        const photoInput = document.getElementById('editReportPhoto');
+        const saveButton = document.getElementById('saveEditReportButton');
+
+        const foremanId = foremanSelect ? parseInt(foremanSelect.value, 10) : NaN;
+        const workId = workSelect ? parseInt(workSelect.value, 10) : NaN;
+        const quantityValue = quantityInput ? parseFloat(quantityInput.value) : NaN;
+        const reportDate = dateInput ? dateInput.value : '';
+        const reportTime = timeInput ? timeInput.value : '';
+        const photoUrl = photoInput ? photoInput.value.trim() : '';
+
+        if (!Number.isInteger(foremanId)) {
+            showEditReportError('Выберите бригадира');
+            return;
+        }
+
+        if (!Number.isInteger(workId)) {
+            showEditReportError('Выберите работу');
+            return;
+        }
+
+        if (!Number.isFinite(quantityValue) || quantityValue <= 0) {
+            showEditReportError('Введите корректное количество (больше 0)');
+            return;
+        }
+
+        if (!reportDate) {
+            showEditReportError('Укажите дату отчета');
+            return;
+        }
+
+        if (!reportTime) {
+            showEditReportError('Укажите время отчета');
+            return;
+        }
+
+        showEditReportError('');
+
+        const payload = {
+            foreman_id: foremanId,
+            work_id: workId,
+            quantity: quantityValue,
+            report_date: reportDate,
+            report_time: reportTime
+        };
+
+        if (photoUrl) {
+            payload.photo_report_url = photoUrl;
+        }
+
+        if (saveButton) {
+            saveButton.disabled = true;
+        }
+
+        try {
+            const response = await makeApiRequest(`${API_CONFIG.ENDPOINTS.REPORT}/${currentEditingReportId}`, {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+
+            if (!response || !response.success) {
+                const errorMessage = response?.error || response?.detail || 'Не удалось сохранить изменения отчета';
+                showEditReportError(errorMessage);
+                return;
+            }
+
+            const successMessage = response.message || 'Отчет успешно обновлен';
+            showNotification(successMessage, 'success');
+            closeEditReportModal();
+
+            await loadWorks();
+            await loadAllReports();
+        } catch (error) {
+            console.error('Ошибка при сохранении отчета:', error);
+            showEditReportError('Ошибка при сохранении отчета: ' + error.message);
+        } finally {
+            if (saveButton) {
+                saveButton.disabled = false;
             }
         }
     }
