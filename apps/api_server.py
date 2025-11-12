@@ -2391,11 +2391,17 @@ async def update_work_materials(work_id: int, request: Request):
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Неверный формат JSON")
 
-    if isinstance(payload, dict) and 'materials' in payload:
-        materials_list = payload['materials']
+    pricing_payload = None
+
+    if isinstance(payload, dict):
+        pricing_payload = payload.get('pricing')
+
+        if 'materials' in payload:
+            materials_list = payload['materials']
+        else:
+            materials_list = []
     elif isinstance(payload, list):
         materials_list = payload
-        pricing_payload = payload.get('pricing')
     elif payload is None:
         materials_list = []
     else:
