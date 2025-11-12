@@ -206,7 +206,20 @@ async def ensure_work_pricing_columns():
                 await db.execute(
                     "ALTER TABLE works ADD COLUMN unit_cost_without_vat REAL NOT NULL DEFAULT 0"
                 )
-                async def ensure_material_pricing_columns():
+                logger.info("✅ Добавлена колонка unit_cost_without_vat в таблицу works")
+
+            if 'total_cost_without_vat' not in columns:
+                await db.execute(
+                    "ALTER TABLE works ADD COLUMN total_cost_without_vat REAL NOT NULL DEFAULT 0"
+                )
+                logger.info("✅ Добавлена колонка total_cost_without_vat в таблицу works")
+
+            await db.commit()
+    except Exception as exc:
+        logger.error(f"⚠️ Ошибка при добавлении колонок цен в works: {exc}")
+
+
+async def ensure_material_pricing_columns():
     """Гарантирует наличие колонок цен в таблице materials."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
