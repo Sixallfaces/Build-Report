@@ -206,17 +206,28 @@ async def ensure_work_pricing_columns():
                 await db.execute(
                     "ALTER TABLE works ADD COLUMN unit_cost_without_vat REAL NOT NULL DEFAULT 0"
                 )
-                logger.info("✅ Добавлена колонка unit_cost_without_vat в таблицу works")
+                async def ensure_material_pricing_columns():
+    """Гарантирует наличие колонок цен в таблице materials."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("PRAGMA table_info(materials)") as cursor:
+                columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'unit_cost_without_vat' not in columns:
+                await db.execute(
+                    "ALTER TABLE materials ADD COLUMN unit_cost_without_vat REAL NOT NULL DEFAULT 0"
+                )
+                logger.info("✅ Добавлена колонка unit_cost_without_vat в таблицу materials")
 
             if 'total_cost_without_vat' not in columns:
                 await db.execute(
-                    "ALTER TABLE works ADD COLUMN total_cost_without_vat REAL NOT NULL DEFAULT 0"
+                    "ALTER TABLE materials ADD COLUMN total_cost_without_vat REAL NOT NULL DEFAULT 0"
                 )
-                logger.info("✅ Добавлена колонка total_cost_without_vat в таблицу works")
+                logger.info("✅ Добавлена колонка total_cost_without_vat в таблицу materials")
 
             await db.commit()
     except Exception as exc:
-        logger.error(f"⚠️ Ошибка при добавлении колонок цен в works: {exc}")
+        logger.error(f"⚠️ Ошибка при добавлении колонок цен в materials: {exc}")
 
 # Хэш-функция для паролей
 def hash_password(password: str) -> str:
@@ -790,6 +801,8 @@ async def init_materials_table():
                 name TEXT NOT NULL,
                 unit TEXT NOT NULL,
                 quantity REAL NOT NULL DEFAULT 0,
+                unit_cost_without_vat REAL NOT NULL DEFAULT 0,
+                total_cost_without_vat REAL NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
             )
         ''')
@@ -905,18 +918,30 @@ async def get_all_materials_from_db():
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                "SELECT id, category, name, unit, quantity, created_at FROM materials ORDER BY name"
+                "SELECT id, category, name, unit, quantity, unit_cost_without_vat, total_cost_without_vat, created_at "
+                "FROM materials ORDER BY name"
             ) as cursor:
                 rows = await cursor.fetchall()
                 materials = []
                 for row in rows:
-                    material_id, category, name, unit, quantity, created_at = row
+                    (
+                        material_id,
+                        category,
+                        name,
+                        unit,
+                        quantity,
+                        unit_cost_without_vat,
+                        total_cost_without_vat,
+                        created_at,
+                    ) = row
                     materials.append({
                         'id': material_id,
                         'category': category,
                         'name': name,
                         'unit': unit,
                         'quantity': quantity,
+                        'unit_cost_without_vat': unit_cost_without_vat or 0,
+                        'total_cost_without_vat': total_cost_without_vat or 0,
                         'created_at': created_at
                     })
                 logger.info(f"📦 Найдено материалов в БД: {len(materials)}")
@@ -930,24 +955,74 @@ async def get_material_by_id(material_id: int):
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                "SELECT id, category, name, unit, quantity, created_at FROM materials WHERE id = ?",
+                "SELECT id, category, name, unit, quantity, unit_cost_without_vat, total_cost_without_vat, created_at "
+                "FROM materials WHERE id = ?",
                 (material_id,)
             ) as cursor:
                 row = await cursor.fetchone()
                 if row:
-                    material_id, category, name, unit, quantity, created_at = row
+                    (
+                        material_id,
+                        category,
+                        name,
+                        unit,
+                        quantity,
+                        unit_cost_without_vat,
+                        total_cost_without_vat,
+                        created_at,
+                    ) = row
                     return {
                         'id': material_id,
                         'category': category,
                         'name': name,
                         'unit': unit,
                         'quantity': quantity,
+                        'unit_cost_without_vat': unit_cost_without_vat or 0,
+                        'total_cost_without_vat': total_cost_without_vat or 0,
                         'created_at': created_at
                     }
         return None
     except Exception as e:
         logger.error(f"⚠️ Ошибка получения материала ID {material_id}: {e}")
         return None
+    
+async def get_material_pricing_from_db(material_id: int) -> Optional[dict]:
+    """Возвращает значения стоимости для материала."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT unit_cost_without_vat, total_cost_without_vat FROM materials WHERE id = ?",
+                (material_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    unit_cost_without_vat, total_cost_without_vat = row
+                    return {
+                        'unit_cost_without_vat': unit_cost_without_vat or 0,
+                        'total_cost_without_vat': total_cost_without_vat or 0,
+                    }
+    except Exception as exc:
+        logger.error(f"⚠️ Ошибка получения стоимости материала ID {material_id}: {exc}")
+    return None
+
+
+async def update_material_pricing_in_db(
+    material_id: int,
+    unit_cost_without_vat: float,
+    total_cost_without_vat: float,
+) -> bool:
+    """Обновляет значения стоимости для материала."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "UPDATE materials SET unit_cost_without_vat = ?, total_cost_without_vat = ? WHERE id = ?",
+                (unit_cost_without_vat, total_cost_without_vat, material_id),
+            )
+            await db.commit()
+            return True
+    except Exception as exc:
+        logger.error(f"⚠️ Ошибка обновления стоимости материала ID {material_id}: {exc}")
+        return False
 
 async def fetch_work_materials_requirements(db, work_id: int):
     """Получает список материалов и норм расхода для указанной работы, используя существующее соединение"""
@@ -1048,13 +1123,19 @@ async def insert_material_to_db(material_data: dict, performed_by: Optional[str]
     """Добавляет новый материал"""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
+            unit_cost_without_vat = float(material_data.get('unit_cost_without_vat', 0) or 0)
+            total_cost_without_vat = float(material_data.get('total_cost_without_vat', 0) or 0)
+
             cursor = await db.execute(
-                "INSERT INTO materials (category, name, unit, quantity, created_at) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO materials (category, name, unit, quantity, unit_cost_without_vat, total_cost_without_vat, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     material_data['category'],
                     material_data['name'],
                     material_data['unit'],
                     material_data['quantity'],
+                    unit_cost_without_vat,
+                    total_cost_without_vat,
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 )
             )
@@ -1847,6 +1928,7 @@ async def startup_event():
     await init_material_history_table()
     await ensure_work_reports_verification_column()
     await ensure_work_pricing_columns()
+    await ensure_material_pricing_columns()
 
 
 @app.get("/api/works/export")
@@ -2202,6 +2284,7 @@ async def startup_event():
     await init_work_materials_table()
     await ensure_work_reports_verification_column()
     await ensure_work_pricing_columns()
+    await ensure_material_pricing_columns()
 
 
 # Эндпоинты для работ
@@ -2498,13 +2581,74 @@ async def get_material(material_id: int):
         raise HTTPException(status_code=404, detail="Материал не найден")
     return {"success": True, "data": material}
 
+@app.get("/api/materials/{material_id}/pricing")
+async def get_material_pricing(material_id: int):
+    material = await get_material_by_id(material_id)
+    if material is None:
+        raise HTTPException(status_code=404, detail="Материал не найден")
+
+    pricing = await get_material_pricing_from_db(material_id)
+    if pricing is None:
+        pricing = {'unit_cost_without_vat': 0, 'total_cost_without_vat': 0}
+
+    return {"success": True, "data": pricing}
+
+
+@app.put("/api/materials/{material_id}/pricing")
+async def update_material_pricing(material_id: int, request: Request):
+    material = await get_material_by_id(material_id)
+    if material is None:
+        raise HTTPException(status_code=404, detail="Материал не найден")
+
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Неверный формат JSON")
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Неверный формат данных")
+
+    def parse_cost(value, field_name):
+        if value is None or value == "":
+            return 0.0
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"{field_name} должно быть числом")
+        if numeric < 0:
+            raise HTTPException(status_code=400, detail=f"{field_name} должно быть >= 0")
+        return float(numeric)
+
+    unit_cost_without_vat = parse_cost(payload.get('unit_cost_without_vat'), 'unit_cost_without_vat')
+    total_cost_without_vat = parse_cost(payload.get('total_cost_without_vat'), 'total_cost_without_vat')
+
+    updated = await update_material_pricing_in_db(
+        material_id,
+        unit_cost_without_vat,
+        total_cost_without_vat,
+    )
+
+    if not updated:
+        raise HTTPException(status_code=500, detail="Не удалось сохранить стоимость материала")
+
+    updated_pricing = await get_material_pricing_from_db(material_id) or {
+        'unit_cost_without_vat': unit_cost_without_vat,
+        'total_cost_without_vat': total_cost_without_vat,
+    }
+
+    return {
+        "success": True,
+        "message": "Стоимость материала обновлена",
+        "data": updated_pricing,
+    }
+
 
 @app.post("/api/materials")
 async def create_material(request: Request):
     try:
         material_data = await request.json()
         performed_by = material_data.pop('performed_by', None)
-        performed_by = material_data.pop('performed_by', None)
+        
 
         required_fields = ["name", "category", "unit", "quantity"]
         for field in required_fields:

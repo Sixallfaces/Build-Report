@@ -1081,6 +1081,40 @@
         </div>
     </div>
 
+    <div id="materialPricingModal" class="modal">
+        <div class="modal-content">
+            <h3 class="modal-title">Стоимость материала</h3>
+            <p class="modal-subtitle">Материал: <span id="materialPricingName"></span></p>
+
+            <div class="work-pricing-section" style="padding: 0; border: none;">
+                <div class="work-pricing-list">
+                    <div class="work-pricing-row">
+                        <label for="materialPriceUnitWithVat">Стоимость за единицу (с НДС)</label>
+                        <input type="number" id="materialPriceUnitWithVat" min="0" step="0.01" placeholder="0.00">
+                    </div>
+                    <div class="work-pricing-row">
+                        <label for="materialPriceTotalWithVat">Всего стоимость (с НДС)</label>
+                        <input type="number" id="materialPriceTotalWithVat" min="0" step="0.01" placeholder="0.00">
+                    </div>
+                    <div class="work-pricing-row">
+                        <label for="materialPriceUnitWithoutVat">Стоимость за единицу (без НДС)</label>
+                        <input type="number" id="materialPriceUnitWithoutVat" min="0" step="0.01" placeholder="0.00">
+                    </div>
+                    <div class="work-pricing-row">
+                        <label for="materialPriceTotalWithoutVat">Всего стоимость (без НДС)</label>
+                        <input type="number" id="materialPriceTotalWithoutVat" min="0" step="0.01" placeholder="0.00">
+                    </div>
+                </div>
+                <div class="work-pricing-hint">НДС рассчитывается автоматически (20%).</div>
+            </div>
+
+            <div class="modal-actions">
+                <button id="materialPricingSaveButton" class="success" type="button">💾 Сохранить</button>
+                <button type="button" class="secondary" onclick="closeMaterialPricingModal()">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
     <div id="workMaterialsModal" class="modal work-materials-modal">
         <div class="modal-content">
             <h3 class="modal-title">Материалы работы</h3>
@@ -1594,6 +1628,11 @@
     let currentMaterialIdForQuantity = null;
     let currentMaterialQuantity = 0;
     let currentMaterialUnit = '';
+    let currentMaterialIdForPricing = null;
+    let currentMaterialPricing = {
+        unitWithoutVat: null,
+        totalWithoutVat: null
+    };
     let materialHistory = [];
     let materialHistoryLoaded = false;
     let isMaterialHistoryView = false;
@@ -2192,6 +2231,7 @@
         initializeTabs();
         initializeWorksTab();
         initializeWorkMaterialsModal();
+        initializeMaterialPricingModal();
         initializeMaterialsTab();
         initializeForemenTab();
         initializeReportsTab();
@@ -2278,6 +2318,46 @@
 
         // Не закрываем модальное окно при клике на фон
         const modal = document.getElementById('workMaterialsModal');
+        if (modal) {
+            modal.addEventListener('click', event => {
+                if (event.target === modal) {
+                    event.stopPropagation();
+                }
+            });
+        }
+    }
+
+    function initializeMaterialPricingModal() {
+        const pricingInputs = [
+            { id: 'materialPriceUnitWithVat', field: 'unitWithVat' },
+            { id: 'materialPriceTotalWithVat', field: 'totalWithVat' },
+            { id: 'materialPriceUnitWithoutVat', field: 'unitWithoutVat' },
+            { id: 'materialPriceTotalWithoutVat', field: 'totalWithoutVat' }
+        ];
+
+        pricingInputs.forEach(({ id, field }) => {
+            const input = document.getElementById(id);
+            if (!input) return;
+
+            input.addEventListener('input', event => {
+                handleMaterialPricingInput(field, event.target.value);
+                updateMaterialPricingInputs(id);
+            });
+
+            input.addEventListener('blur', () => {
+                updateMaterialPricingInputs();
+            });
+        });
+
+        const saveButton = document.getElementById('materialPricingSaveButton');
+        if (saveButton) {
+            saveButton.addEventListener('click', event => {
+                event.preventDefault();
+                saveMaterialPricing();
+            });
+        }
+
+        const modal = document.getElementById('materialPricingModal');
         if (modal) {
             modal.addEventListener('click', event => {
                 if (event.target === modal) {
@@ -3386,6 +3466,174 @@
             totalWithoutVat: null
         };
         updateWorkPricingInputs();
+    }
+
+    function updateMaterialPricingInputs(excludeIds = []) {
+        const exclude = Array.isArray(excludeIds) ? new Set(excludeIds) : new Set([excludeIds]);
+
+        const unitWithInput = document.getElementById('materialPriceUnitWithVat');
+        const totalWithInput = document.getElementById('materialPriceTotalWithVat');
+        const unitWithoutInput = document.getElementById('materialPriceUnitWithoutVat');
+        const totalWithoutInput = document.getElementById('materialPriceTotalWithoutVat');
+
+        const unitWithoutBase = typeof currentMaterialPricing.unitWithoutVat === 'number'
+            ? roundMoneyValue(Math.max(currentMaterialPricing.unitWithoutVat, 0))
+            : null;
+        const totalWithoutBase = typeof currentMaterialPricing.totalWithoutVat === 'number'
+            ? roundMoneyValue(Math.max(currentMaterialPricing.totalWithoutVat, 0))
+            : null;
+
+        const unitWithBase = unitWithoutBase === null ? null : roundMoneyValue(unitWithoutBase * VAT_MULTIPLIER);
+        const totalWithBase = totalWithoutBase === null ? null : roundMoneyValue(totalWithoutBase * VAT_MULTIPLIER);
+
+        if (unitWithInput && !exclude.has('materialPriceUnitWithVat')) {
+            unitWithInput.value = formatMoneyValue(unitWithBase);
+        }
+        if (totalWithInput && !exclude.has('materialPriceTotalWithVat')) {
+            totalWithInput.value = formatMoneyValue(totalWithBase);
+        }
+        if (unitWithoutInput && !exclude.has('materialPriceUnitWithoutVat')) {
+            unitWithoutInput.value = formatMoneyValue(unitWithoutBase);
+        }
+        if (totalWithoutInput && !exclude.has('materialPriceTotalWithoutVat')) {
+            totalWithoutInput.value = formatMoneyValue(totalWithoutBase);
+        }
+    }
+
+    function handleMaterialPricingInput(field, rawValue) {
+        const parsed = parseMoneyInput(rawValue);
+
+        if (field === 'unitWithVat') {
+            currentMaterialPricing.unitWithoutVat = parsed === null ? null : roundMoneyValue(parsed / VAT_MULTIPLIER);
+        } else if (field === 'totalWithVat') {
+            currentMaterialPricing.totalWithoutVat = parsed === null ? null : roundMoneyValue(parsed / VAT_MULTIPLIER);
+        } else if (field === 'unitWithoutVat') {
+            currentMaterialPricing.unitWithoutVat = parsed === null ? null : roundMoneyValue(parsed);
+        } else if (field === 'totalWithoutVat') {
+            currentMaterialPricing.totalWithoutVat = parsed === null ? null : roundMoneyValue(parsed);
+        }
+    }
+
+    function resetMaterialPricing() {
+        currentMaterialPricing = {
+            unitWithoutVat: null,
+            totalWithoutVat: null
+        };
+        updateMaterialPricingInputs();
+    }
+
+    async function loadMaterialPricing(materialId) {
+        try {
+            const response = await makeApiRequest(`/api/materials/${materialId}/pricing`);
+            if (response && response.success) {
+                const pricingData = response.data || {};
+                currentMaterialPricing = {
+                    unitWithoutVat: normalizeCostValue(pricingData.unit_cost_without_vat),
+                    totalWithoutVat: normalizeCostValue(pricingData.total_cost_without_vat)
+                };
+            } else {
+                const errorMessage = response?.error || response?.detail;
+                resetMaterialPricing();
+                if (errorMessage) {
+                    showNotification('Не удалось загрузить стоимость материала: ' + errorMessage, 'error');
+                }
+            }
+        } catch (error) {
+            resetMaterialPricing();
+            showNotification('Ошибка загрузки стоимости материала: ' + error.message, 'error');
+        }
+
+        updateMaterialPricingInputs();
+    }
+
+    async function openMaterialPricing(materialId) {
+        const modal = document.getElementById('materialPricingModal');
+        if (!modal) return;
+
+        const material = materials.find(item => item.id === materialId);
+        if (!material) {
+            showNotification('Материал не найден', 'error');
+            return;
+        }
+
+        currentMaterialIdForPricing = materialId;
+
+        const nameElement = document.getElementById('materialPricingName');
+        if (nameElement) {
+            const unitSuffix = material.unit ? ` (${material.unit})` : '';
+            nameElement.textContent = `${material.name || `ID ${materialId}`}${unitSuffix}`;
+        }
+
+        resetMaterialPricing();
+        modal.style.display = 'flex';
+
+        await loadMaterialPricing(materialId);
+    }
+
+    async function saveMaterialPricing() {
+        if (!currentMaterialIdForPricing) {
+            showNotification('Материал не выбран', 'error');
+            return;
+        }
+
+        const saveButton = document.getElementById('materialPricingSaveButton');
+        if (saveButton) {
+            saveButton.disabled = true;
+        }
+
+        const payload = {
+            unit_cost_without_vat: typeof currentMaterialPricing.unitWithoutVat === 'number'
+                ? roundMoneyValue(Math.max(currentMaterialPricing.unitWithoutVat, 0)) || 0
+                : 0,
+            total_cost_without_vat: typeof currentMaterialPricing.totalWithoutVat === 'number'
+                ? roundMoneyValue(Math.max(currentMaterialPricing.totalWithoutVat, 0)) || 0
+                : 0,
+        };
+
+        try {
+            const response = await makeApiRequest(`/api/materials/${currentMaterialIdForPricing}/pricing`, {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+
+            if (response && response.success) {
+                const pricingData = response.data || payload;
+                currentMaterialPricing = {
+                    unitWithoutVat: normalizeCostValue(pricingData.unit_cost_without_vat),
+                    totalWithoutVat: normalizeCostValue(pricingData.total_cost_without_vat)
+                };
+                updateMaterialPricingInputs();
+
+                const materialIndex = materials.findIndex(item => item.id === currentMaterialIdForPricing);
+                if (materialIndex !== -1) {
+                    materials[materialIndex] = {
+                        ...materials[materialIndex],
+                        unit_cost_without_vat: currentMaterialPricing.unitWithoutVat || 0,
+                        total_cost_without_vat: currentMaterialPricing.totalWithoutVat || 0
+                    };
+                }
+
+                showNotification(response.message || 'Стоимость материала обновлена', 'success');
+            } else {
+                const errorMessage = response?.error || response?.detail || response?.message || 'Не удалось сохранить стоимость материала';
+                showNotification(errorMessage, 'error');
+            }
+        } catch (error) {
+            showNotification('Ошибка сохранения стоимости материала: ' + error.message, 'error');
+        } finally {
+            if (saveButton) {
+                saveButton.disabled = false;
+            }
+        }
+    }
+
+    function closeMaterialPricingModal() {
+        const modal = document.getElementById('materialPricingModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+        currentMaterialIdForPricing = null;
+        resetMaterialPricing();
     }
 
     async function loadWorkMaterials(workId) {
@@ -4501,6 +4749,7 @@
                 <td><input type="number" value="${quantityValue}" class="editable" data-field="quantity" step="1" min="0"></td>
                 <td class="action-buttons">
                     <button onclick="saveMaterial(${material.id})" class="secondary">💾</button>
+                    <button onclick="openMaterialPricing(${material.id})" class="secondary" title="Стоимость материала">🧾</button>
                     <button onclick="addMaterialQuantity(${material.id})" class="success" title="Добавить на склад">➕</button>
                     <button onclick="deleteMaterial(${material.id})" class="danger">🗑️</button>
                 </td>
