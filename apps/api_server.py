@@ -23,6 +23,7 @@ import requests
 DB_PATH = '/opt/stroykontrol/database/stroykontrol.db'
 API_HOST = '127.0.0.1'
 API_PORT = 8080
+VAT_MULTIPLIER = 1.2
 
 # --- Настройки Яндекс.Диска ---
 YANDEX_DISK_TOKEN = os.getenv('YANDEX_DISK_TOKEN')
@@ -194,6 +195,28 @@ async def ensure_work_reports_verification_column():
     except Exception as exc:
         logger.error(f"⚠️ Ошибка при добавлении колонки is_verified: {exc}")
 
+async def ensure_work_pricing_columns():
+    """Гарантирует наличие колонок цен в таблице works."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("PRAGMA table_info(works)") as cursor:
+                columns = [row[1] for row in await cursor.fetchall()]
+
+            if 'unit_cost_without_vat' not in columns:
+                await db.execute(
+                    "ALTER TABLE works ADD COLUMN unit_cost_without_vat REAL NOT NULL DEFAULT 0"
+                )
+                logger.info("✅ Добавлена колонка unit_cost_without_vat в таблицу works")
+
+            if 'total_cost_without_vat' not in columns:
+                await db.execute(
+                    "ALTER TABLE works ADD COLUMN total_cost_without_vat REAL NOT NULL DEFAULT 0"
+                )
+                logger.info("✅ Добавлена колонка total_cost_without_vat в таблицу works")
+
+            await db.commit()
+    except Exception as exc:
+        logger.error(f"⚠️ Ошибка при добавлении колонок цен в works: {exc}")
 
 # Хэш-функция для паролей
 def hash_password(password: str) -> str:
@@ -222,12 +245,23 @@ async def get_active_works_from_db():
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                "SELECT id, name, category, unit, balance, project_total, is_active FROM works WHERE is_active = 1"
+                "SELECT id, name, category, unit, balance, project_total, is_active, "
+                "unit_cost_without_vat, total_cost_without_vat FROM works WHERE is_active = 1"
             ) as cursor:
                 rows = await cursor.fetchall()
                 works = []
                 for row in rows:
-                    work_id, name, category, unit, balance, project_total, is_active = row
+                    (
+                        work_id,
+                        name,
+                        category,
+                        unit,
+                        balance,
+                        project_total,
+                        is_active,
+                        unit_cost_without_vat,
+                        total_cost_without_vat,
+                    ) = row
                     works.append({
                         'id': work_id,
                         'Название работы': name,
@@ -235,7 +269,11 @@ async def get_active_works_from_db():
                         'Единица измерения': unit,
                         'На балансе': balance,
                         'Проект': project_total,  # НОВОЕ ПОЛЕ
-                        'is_active': bool(is_active)
+                        'is_active': bool(is_active),
+                        'Стоимость за единицу (без НДС)': unit_cost_without_vat or 0,
+                        'Стоимость за единицу (с НДС)': round((unit_cost_without_vat or 0) * VAT_MULTIPLIER, 2),
+                        'Всего стоимость (без НДС)': total_cost_without_vat or 0,
+                        'Всего стоимость (с НДС)': round((total_cost_without_vat or 0) * VAT_MULTIPLIER, 2),
                     })
                 logger.info(f"🔍 Найдено активных работ в БД: {len(works)}")
                 return works
@@ -248,12 +286,23 @@ async def get_all_works_from_db():
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                "SELECT id, name, category, unit, balance, project_total, is_active FROM works"
+                "SELECT id, name, category, unit, balance, project_total, is_active, "
+                "unit_cost_without_vat, total_cost_without_vat FROM works"
             ) as cursor:
                 rows = await cursor.fetchall()
                 works = []
                 for row in rows:
-                    work_id, name, category, unit, balance, project_total, is_active = row
+                    (
+                        work_id,
+                        name,
+                        category,
+                        unit,
+                        balance,
+                        project_total,
+                        is_active,
+                        unit_cost_without_vat,
+                        total_cost_without_vat,
+                    ) = row
                     works.append({
                         'id': work_id,
                         'Название работы': name,
@@ -261,7 +310,11 @@ async def get_all_works_from_db():
                         'Единица измерения': unit,
                         'На балансе': balance,
                         'Проект': project_total,  # НОВОЕ ПОЛЕ
-                        'is_active': bool(is_active)
+                        'is_active': bool(is_active),
+                        'Стоимость за единицу (без НДС)': unit_cost_without_vat or 0,
+                        'Стоимость за единицу (с НДС)': round((unit_cost_without_vat or 0) * VAT_MULTIPLIER, 2),
+                        'Всего стоимость (без НДС)': total_cost_without_vat or 0,
+                        'Всего стоимость (с НДС)': round((total_cost_without_vat or 0) * VAT_MULTIPLIER, 2),
                     })
                 logger.info(f"🔍 Найдено всех работ в БД: {len(works)}")
                 return works
@@ -274,12 +327,23 @@ async def get_work_by_id(work_id: int):
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                "SELECT id, name, category, unit, balance, project_total, is_active FROM works WHERE id = ?",
+                "SELECT id, name, category, unit, balance, project_total, is_active, "
+                "unit_cost_without_vat, total_cost_without_vat FROM works WHERE id = ?",
                 (work_id,)
             ) as cursor:
                 row = await cursor.fetchone()
                 if row:
-                    work_id, name, category, unit, balance, project_total, is_active = row
+                    (
+                        work_id,
+                        name,
+                        category,
+                        unit,
+                        balance,
+                        project_total,
+                        is_active,
+                        unit_cost_without_vat,
+                        total_cost_without_vat,
+                    ) = row
                     return {
                         'id': work_id,
                         'Название работы': name,
@@ -287,7 +351,11 @@ async def get_work_by_id(work_id: int):
                         'Единица измерения': unit,
                         'На балансе': balance,
                         'Проект': project_total,  # НОВОЕ ПОЛЕ
-                        'is_active': bool(is_active)
+                        'is_active': bool(is_active),
+                        'Стоимость за единицу (без НДС)': unit_cost_without_vat or 0,
+                        'Стоимость за единицу (с НДС)': round((unit_cost_without_vat or 0) * VAT_MULTIPLIER, 2),
+                        'Всего стоимость (без НДС)': total_cost_without_vat or 0,
+                        'Всего стоимость (с НДС)': round((total_cost_without_vat or 0) * VAT_MULTIPLIER, 2),
                     }
         return None
     except Exception as e:
@@ -300,9 +368,18 @@ async def insert_work_to_db(work_data: dict):
         logger.info(f"DEBUG: insert_work_to_db пытается вставить: {work_data}")
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
-                "INSERT INTO works (name, category, unit, balance, project_total, is_active) VALUES (?, ?, ?, ?, ?, ?)",
-                (work_data['name'], work_data['category'], work_data['unit'], 
-                 work_data['balance'], work_data.get('project_total', 0), work_data['is_active'])
+                "INSERT INTO works (name, category, unit, balance, project_total, is_active, "
+                "unit_cost_without_vat, total_cost_without_vat) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    work_data['name'],
+                    work_data['category'],
+                    work_data['unit'],
+                    work_data['balance'],
+                    work_data.get('project_total', 0),
+                    work_data['is_active'],
+                    work_data.get('unit_cost_without_vat', 0),
+                    work_data.get('total_cost_without_vat', 0),
+                )
             )
             await db.commit()
             work_id = db.last_insert_rowid()
@@ -321,9 +398,19 @@ async def update_work_in_db(work_id: int, work_data: dict):
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
-                "UPDATE works SET name = ?, category = ?, unit = ?, balance = ?, project_total = ?, is_active = ? WHERE id = ?",
-                (work_data['name'], work_data['category'], work_data['unit'], 
-                 work_data['balance'], work_data.get('project_total', 0), work_data['is_active'], work_id)
+                "UPDATE works SET name = ?, category = ?, unit = ?, balance = ?, project_total = ?, "
+                "is_active = ?, unit_cost_without_vat = ?, total_cost_without_vat = ? WHERE id = ?",
+                (
+                    work_data['name'],
+                    work_data['category'],
+                    work_data['unit'],
+                    work_data['balance'],
+                    work_data.get('project_total', 0),
+                    work_data['is_active'],
+                    work_data.get('unit_cost_without_vat', 0),
+                    work_data.get('total_cost_without_vat', 0),
+                    work_id,
+                )
             )
             await db.commit()
             if db.rowcount > 0:
@@ -482,11 +569,7 @@ async def update_foreman_in_db(foreman_id: int, foreman_data: dict):
                 or foreman_data.get('last_name')
                 or existing_last
             )
-            username = (
-                foreman_data['username']
-                if 'username' in foreman_data
-                else (existing_username or '')
-            )
+            username = existing_username or ''
             is_active = foreman_data.get('is_active', existing_is_active)
 
             await db.execute(
@@ -896,6 +979,40 @@ async def get_work_materials_from_db(work_id: int):
     except Exception as e:
         logger.error(f"⚠️ Ошибка получения материалов для работы ID {work_id}: {e}")
         return []
+
+async def get_work_pricing_from_db(work_id: int) -> dict:
+    """Возвращает сохраненные значения стоимости для работы."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT unit_cost_without_vat, total_cost_without_vat FROM works WHERE id = ?",
+                (work_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    unit_cost_without_vat, total_cost_without_vat = row
+                    return {
+                        'unit_cost_without_vat': unit_cost_without_vat or 0,
+                        'total_cost_without_vat': total_cost_without_vat or 0,
+                    }
+    except Exception as exc:
+        logger.error(f"⚠️ Ошибка получения стоимости для работы ID {work_id}: {exc}")
+    return {'unit_cost_without_vat': 0, 'total_cost_without_vat': 0}
+
+
+async def update_work_pricing_in_db(work_id: int, unit_cost_without_vat: float, total_cost_without_vat: float) -> bool:
+    """Обновляет значения стоимости работы."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "UPDATE works SET unit_cost_without_vat = ?, total_cost_without_vat = ? WHERE id = ?",
+                (unit_cost_without_vat, total_cost_without_vat, work_id),
+            )
+            await db.commit()
+            return True
+    except Exception as exc:
+        logger.error(f"⚠️ Ошибка обновления стоимости для работы ID {work_id}: {exc}")
+        return False
 
 async def replace_work_materials_for_work(work_id: int, materials_data: List[dict]):
     """Полностью заменяет набор материалов для работы"""
@@ -1729,6 +1846,7 @@ async def startup_event():
     await init_work_materials_table()
     await init_material_history_table()
     await ensure_work_reports_verification_column()
+    await ensure_work_pricing_columns()
 
 
 @app.get("/api/works/export")
@@ -2083,6 +2201,7 @@ async def startup_event():
     await init_materials_table()
     await init_work_materials_table()
     await ensure_work_reports_verification_column()
+    await ensure_work_pricing_columns()
 
 
 # Эндпоинты для работ
@@ -2125,6 +2244,19 @@ async def create_work(request: Request):
         if 'project_total' not in work_data:
             work_data['project_total'] = 0
 
+        try:
+            unit_cost_without_vat = float(work_data.get('unit_cost_without_vat', 0) or 0)
+            total_cost_without_vat = float(work_data.get('total_cost_without_vat', 0) or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Стоимость должна быть числом")
+
+        if unit_cost_without_vat < 0 or total_cost_without_vat < 0:
+            raise HTTPException(status_code=400, detail="Стоимость не может быть отрицательной")
+
+        work_data['unit_cost_without_vat'] = unit_cost_without_vat
+        work_data['total_cost_without_vat'] = total_cost_without_vat
+   
+
         work_id = await insert_work_to_db(work_data)
         if work_id is not None:
             created_work = await get_work_by_id(work_id)
@@ -2161,6 +2293,18 @@ async def update_work(work_id: int, request: Request):
         if 'project_total' not in work_data:
             work_data['project_total'] = 0
 
+        try:
+            unit_cost_without_vat = float(work_data.get('unit_cost_without_vat', 0) or 0)
+            total_cost_without_vat = float(work_data.get('total_cost_without_vat', 0) or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Стоимость должна быть числом")
+
+        if unit_cost_without_vat < 0 or total_cost_without_vat < 0:
+            raise HTTPException(status_code=400, detail="Стоимость не может быть отрицательной")
+
+        work_data['unit_cost_without_vat'] = unit_cost_without_vat
+        work_data['total_cost_without_vat'] = total_cost_without_vat
+
         success = await update_work_in_db(work_id, work_data)
         if success:
             updated_work = await get_work_by_id(work_id)
@@ -2185,6 +2329,8 @@ async def add_work_balance(work_id: int, request: Request):
         payload = await request.json()
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Неверный формат JSON")
+
+    pricing_payload = None
 
     if 'amount' not in payload:
         raise HTTPException(status_code=400, detail="Отсутствует поле: amount")
@@ -2231,7 +2377,8 @@ async def get_work_materials(work_id: int):
         raise HTTPException(status_code=404, detail="Работа не найдена")
 
     materials_for_work = await get_work_materials_from_db(work_id)
-    return {"success": True, "data": materials_for_work}
+    pricing = await get_work_pricing_from_db(work_id)
+    return {"success": True, "data": materials_for_work, "pricing": pricing}
 
 @app.put("/api/works/{work_id}/materials")
 async def update_work_materials(work_id: int, request: Request):
@@ -2248,6 +2395,7 @@ async def update_work_materials(work_id: int, request: Request):
         materials_list = payload['materials']
     elif isinstance(payload, list):
         materials_list = payload
+        pricing_payload = payload.get('pricing')
     elif payload is None:
         materials_list = []
     else:
@@ -2293,15 +2441,37 @@ async def update_work_materials(work_id: int, request: Request):
             'quantity_per_unit': quantity_per_unit
         })
 
+    unit_cost_without_vat = None
+    total_cost_without_vat = None
+
+    if pricing_payload is not None:
+        if not isinstance(pricing_payload, dict):
+            raise HTTPException(status_code=400, detail="Некорректный формат данных стоимости")
+        try:
+            unit_cost_without_vat = float(pricing_payload.get('unit_cost_without_vat', 0) or 0)
+            total_cost_without_vat = float(pricing_payload.get('total_cost_without_vat', 0) or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Стоимость должна быть числом")
+
+        if unit_cost_without_vat < 0 or total_cost_without_vat < 0:
+            raise HTTPException(status_code=400, detail="Стоимость не может быть отрицательной")
+
     success, error_message = await replace_work_materials_for_work(work_id, normalized_materials)
     if not success:
         raise HTTPException(status_code=400, detail=error_message or "Не удалось сохранить материалы")
+    
+    if unit_cost_without_vat is not None and total_cost_without_vat is not None:
+        pricing_saved = await update_work_pricing_in_db(work_id, unit_cost_without_vat, total_cost_without_vat)
+        if not pricing_saved:
+            raise HTTPException(status_code=500, detail="Не удалось сохранить стоимость работы")
 
     updated_materials = await get_work_materials_from_db(work_id)
+    updated_pricing = await get_work_pricing_from_db(work_id)
     return {
         "success": True,
         "message": "Материалы для работы обновлены",
-        "data": updated_materials
+        "data": updated_materials,
+        "pricing": updated_pricing
     }
 
 # Эндпоинты для материалов склада

@@ -735,6 +735,59 @@
             box-sizing: border-box;
         }
 
+        .work-pricing-section {
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 10px;
+            border: 1px solid rgba(84, 176, 165, 0.4);
+            background: rgba(84, 176, 165, 0.08);
+        }
+
+        .work-pricing-section h4 {
+            margin: 0 0 12px;
+            color: var(--accent);
+            font-size: 1.1rem;
+        }
+
+        .work-pricing-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .work-pricing-row {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .work-pricing-row label {
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .work-pricing-row input {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(84, 176, 165, 0.4);
+            background: rgba(30, 47, 64, 0.6);
+            color: var(--light);
+            font-size: 1rem;
+        }
+
+        .work-pricing-row input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(84, 176, 165, 0.25);
+        }
+
+        .work-pricing-hint {
+            margin-top: 10px;
+            font-size: 0.85rem;
+            color: rgba(255, 255, 255, 0.65);
+        }
+
         .foreman-sections-modal .modal-content {
             max-width: 560px;
         }
@@ -1056,6 +1109,29 @@
                     <tr><td colspan="6" style="text-align: center;">Материалы не назначены</td></tr>
                 </tbody>
             </table>
+
+            <div class="work-pricing-section">
+                <h4>Стоимость работы</h4>
+                <div class="work-pricing-list">
+                    <div class="work-pricing-row">
+                        <label for="workPriceUnitWithVat">Стоимость за единицу (с НДС)</label>
+                        <input type="number" id="workPriceUnitWithVat" min="0" step="0.01" placeholder="0.00">
+                    </div>
+                    <div class="work-pricing-row">
+                        <label for="workPriceTotalWithVat">Всего стоимость (с НДС)</label>
+                        <input type="number" id="workPriceTotalWithVat" min="0" step="0.01" placeholder="0.00">
+                    </div>
+                    <div class="work-pricing-row">
+                        <label for="workPriceUnitWithoutVat">Стоимость за единицу (без НДС)</label>
+                        <input type="number" id="workPriceUnitWithoutVat" min="0" step="0.01" placeholder="0.00">
+                    </div>
+                    <div class="work-pricing-row">
+                        <label for="workPriceTotalWithoutVat">Всего стоимость (без НДС)</label>
+                        <input type="number" id="workPriceTotalWithoutVat" min="0" step="0.01" placeholder="0.00">
+                    </div>
+                </div>
+                <div class="work-pricing-hint">НДС рассчитывается автоматически (20%).</div>
+            </div>
 
             <div class="modal-actions">
                 <button onclick="saveWorkMaterials()" class="success">💾 Сохранить</button>
@@ -1498,6 +1574,9 @@
         return `${normalizedBase}/${normalizedPath}`;
     }
 
+    const VAT_RATE = 0.2;
+    const VAT_MULTIPLIER = 1 + VAT_RATE;
+
     // Переменные состояния
     let works = [];
     let availableReportWorks = [];
@@ -1508,6 +1587,10 @@
     let categories = [];
     let currentWorkIdForMaterials = null;
     let currentWorkMaterials = [];
+    let currentWorkPricing = {
+        unitWithoutVat: null,
+        totalWithoutVat: null
+    };
     let currentMaterialIdForQuantity = null;
     let currentMaterialQuantity = 0;
     let currentMaterialUnit = '';
@@ -2171,6 +2254,27 @@
                 addMaterialToWorkList();
             });
         }
+
+        const pricingInputs = [
+            { id: 'workPriceUnitWithVat', field: 'unitWithVat' },
+            { id: 'workPriceTotalWithVat', field: 'totalWithVat' },
+            { id: 'workPriceUnitWithoutVat', field: 'unitWithoutVat' },
+            { id: 'workPriceTotalWithoutVat', field: 'totalWithoutVat' }
+        ];
+
+        pricingInputs.forEach(({ id, field }) => {
+            const input = document.getElementById(id);
+            if (!input) return;
+
+            input.addEventListener('input', event => {
+                handlePricingInput(field, event.target.value);
+                updateWorkPricingInputs(id);
+            });
+
+            input.addEventListener('blur', () => {
+                updateWorkPricingInputs();
+            });
+        });
 
         // Не закрываем модальное окно при клике на фон
         const modal = document.getElementById('workMaterialsModal');
@@ -3189,11 +3293,107 @@
         tbody.innerHTML = rowsHtml;
     }
 
+    function roundMoneyValue(value) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            return null;
+        }
+        return Math.round((numeric + Number.EPSILON) * 100) / 100;
+    }
+
+    function normalizeCostValue(value) {
+        if (value === null || value === undefined) {
+            return null;
+        }
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            return null;
+        }
+        return numeric < 0 ? 0 : roundMoneyValue(numeric);
+    }
+
+    function parseMoneyInput(rawValue) {
+        if (rawValue === null || rawValue === undefined) {
+            return null;
+        }
+        const normalized = String(rawValue).replace(',', '.').trim();
+        if (normalized === '') {
+            return null;
+        }
+        const parsed = parseFloat(normalized);
+        if (Number.isNaN(parsed)) {
+            return 0;
+        }
+        return parsed < 0 ? 0 : parsed;
+    }
+
+    function formatMoneyValue(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        return Number(value).toFixed(2);
+    }
+
+    function updateWorkPricingInputs(excludeIds = []) {
+        const exclude = Array.isArray(excludeIds) ? new Set(excludeIds) : new Set([excludeIds]);
+
+        const unitWithInput = document.getElementById('workPriceUnitWithVat');
+        const totalWithInput = document.getElementById('workPriceTotalWithVat');
+        const unitWithoutInput = document.getElementById('workPriceUnitWithoutVat');
+        const totalWithoutInput = document.getElementById('workPriceTotalWithoutVat');
+
+        const unitWithoutBase = typeof currentWorkPricing.unitWithoutVat === 'number'
+            ? roundMoneyValue(Math.max(currentWorkPricing.unitWithoutVat, 0))
+            : null;
+        const totalWithoutBase = typeof currentWorkPricing.totalWithoutVat === 'number'
+            ? roundMoneyValue(Math.max(currentWorkPricing.totalWithoutVat, 0))
+            : null;
+
+        const unitWithBase = unitWithoutBase === null ? null : roundMoneyValue(unitWithoutBase * VAT_MULTIPLIER);
+        const totalWithBase = totalWithoutBase === null ? null : roundMoneyValue(totalWithoutBase * VAT_MULTIPLIER);
+
+        if (unitWithInput && !exclude.has('workPriceUnitWithVat')) {
+            unitWithInput.value = formatMoneyValue(unitWithBase);
+        }
+        if (totalWithInput && !exclude.has('workPriceTotalWithVat')) {
+            totalWithInput.value = formatMoneyValue(totalWithBase);
+        }
+        if (unitWithoutInput && !exclude.has('workPriceUnitWithoutVat')) {
+            unitWithoutInput.value = formatMoneyValue(unitWithoutBase);
+        }
+        if (totalWithoutInput && !exclude.has('workPriceTotalWithoutVat')) {
+            totalWithoutInput.value = formatMoneyValue(totalWithoutBase);
+        }
+    }
+
+    function handlePricingInput(field, rawValue) {
+        const parsed = parseMoneyInput(rawValue);
+
+        if (field === 'unitWithVat') {
+            currentWorkPricing.unitWithoutVat = parsed === null ? null : roundMoneyValue(parsed / VAT_MULTIPLIER);
+        } else if (field === 'totalWithVat') {
+            currentWorkPricing.totalWithoutVat = parsed === null ? null : roundMoneyValue(parsed / VAT_MULTIPLIER);
+        } else if (field === 'unitWithoutVat') {
+            currentWorkPricing.unitWithoutVat = parsed === null ? null : roundMoneyValue(parsed);
+        } else if (field === 'totalWithoutVat') {
+            currentWorkPricing.totalWithoutVat = parsed === null ? null : roundMoneyValue(parsed);
+        }
+    }
+
+    function resetWorkPricing() {
+        currentWorkPricing = {
+            unitWithoutVat: null,
+            totalWithoutVat: null
+        };
+        updateWorkPricingInputs();
+    }
+
     async function loadWorkMaterials(workId) {
         try {
             const response = await makeApiRequest(`/api/works/${workId}/materials`);
             if (response && response.success) {
-                currentWorkMaterials = (response.data || []).map(item => ({
+                const materialsData = Array.isArray(response.data) ? response.data : [];
+                currentWorkMaterials = materialsData.map(item => ({
                     material_id: item.material_id,
                     material_name: item.material_name || `ID ${item.material_id}`,
                     unit: item.unit,
@@ -3201,8 +3401,19 @@
                     quantity_per_unit: parseFloat(item.quantity_per_unit) || 0,
                     available_quantity: item.available_quantity !== undefined ? Number(item.available_quantity) : 0
                 }));
+
+                if (response.pricing && typeof response.pricing === 'object') {
+                    currentWorkPricing = {
+                        unitWithoutVat: normalizeCostValue(response.pricing.unit_cost_without_vat),
+                        totalWithoutVat: normalizeCostValue(response.pricing.total_cost_without_vat)
+                    };
+                    updateWorkPricingInputs();
+                } else {
+                    resetWorkPricing();
+                }
             } else {
                 currentWorkMaterials = [];
+                resetWorkPricing();
                 const errorMessage = response?.error || response?.detail;
                 if (errorMessage) {
                     showNotification('Ошибка загрузки материалов работы: ' + errorMessage, 'error');
@@ -3210,11 +3421,13 @@
             }
         } catch (error) {
             currentWorkMaterials = [];
+            resetWorkPricing();
             showNotification('Ошибка загрузки материалов работы: ' + error.message, 'error');
         }
 
         populateWorkMaterialSelect();
         displayWorkMaterialsList();
+        updateWorkPricingInputs();
     }
 
     async function openWorkMaterials(workId) {
@@ -3245,6 +3458,7 @@
             tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Загрузка...</td></tr>';
         }
 
+        resetWorkPricing();
         modal.style.display = 'flex';
 
         if (!materials || materials.length === 0) {
@@ -3328,19 +3542,34 @@
             return;
         }
 
-        const payload = currentWorkMaterials.map(item => ({
+        const materialsPayload = currentWorkMaterials.map(item => ({
             material_id: item.material_id,
             quantity_per_unit: Number(item.quantity_per_unit) || 0
         }));
 
+        const pricingPayload = {
+            unit_cost_without_vat: typeof currentWorkPricing.unitWithoutVat === 'number'
+                ? roundMoneyValue(Math.max(currentWorkPricing.unitWithoutVat, 0)) || 0
+                : 0,
+            total_cost_without_vat: typeof currentWorkPricing.totalWithoutVat === 'number'
+                ? roundMoneyValue(Math.max(currentWorkPricing.totalWithoutVat, 0)) || 0
+                : 0
+        };
+
+        const requestBody = {
+            materials: materialsPayload,
+            pricing: pricingPayload
+        };
+
         try {
             const response = await makeApiRequest(`/api/works/${currentWorkIdForMaterials}/materials`, {
                 method: 'PUT',
-                body: JSON.stringify({ materials: payload })
+                body: JSON.stringify(requestBody)
             });
 
             if (response && response.success) {
-                currentWorkMaterials = (response.data || []).map(item => ({
+                const materialsData = Array.isArray(response.data) ? response.data : [];
+                currentWorkMaterials = materialsData.map(item => ({
                     material_id: item.material_id,
                     material_name: item.material_name || `ID ${item.material_id}`,
                     unit: item.unit,
@@ -3348,8 +3577,17 @@
                     quantity_per_unit: parseFloat(item.quantity_per_unit) || 0,
                     available_quantity: item.available_quantity !== undefined ? Number(item.available_quantity) : 0
                 }));
+
+                if (response.pricing && typeof response.pricing === 'object') {
+                    currentWorkPricing = {
+                        unitWithoutVat: normalizeCostValue(response.pricing.unit_cost_without_vat),
+                        totalWithoutVat: normalizeCostValue(response.pricing.total_cost_without_vat)
+                    };
+                }
+
                 displayWorkMaterialsList();
                 populateWorkMaterialSelect();
+                updateWorkPricingInputs();
                 showNotification('Материалы работы обновлены', 'success');
             } else {
                 const errorMessage = response?.error || response?.message || 'Не удалось сохранить материалы';
@@ -3367,6 +3605,7 @@
         }
         currentWorkIdForMaterials = null;
         currentWorkMaterials = [];
+        resetWorkPricing();
         populateWorkMaterialSelect();
         displayWorkMaterialsList();
     }
