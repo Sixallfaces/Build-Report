@@ -802,6 +802,47 @@ async def create_category_in_db(category_data: dict):
     except Exception as e:
         logger.error(f"⚠️ Ошибка добавления категории: {e}")
         return None
+
+async def ensure_category_exists_in_db(category_name: str) -> Optional[int]:
+    """Гарантирует наличие категории/раздела в базе данных."""
+    normalized_name = (category_name or '').strip()
+    if not normalized_name:
+        return None
+
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT id FROM categories WHERE lower(name) = lower(?)",
+                (normalized_name,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return row[0]
+
+            try:
+                await db.execute(
+                    "INSERT INTO categories (name, created_date) VALUES (?, ?)",
+                    (normalized_name, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                )
+                await db.commit()
+                category_id = db.last_insert_rowid()
+                logger.info(
+                    "📂 Автоматически добавлен раздел из импорта: %s (ID: %s)",
+                    normalized_name,
+                    category_id,
+                )
+                return category_id
+            except aiosqlite.IntegrityError:
+                async with db.execute(
+                    "SELECT id FROM categories WHERE lower(name) = lower(?)",
+                    (normalized_name,)
+                ) as retry_cursor:
+                    retry_row = await retry_cursor.fetchone()
+                    if retry_row:
+                        return retry_row[0]
+    except Exception as exc:
+        logger.error(f"⚠️ Ошибка гарантии наличия категории '{normalized_name}': {exc}")
+    return None
     
     # ========== ФУНКЦИИ ДЛЯ МАТЕРИАЛОВ ==========
 async def init_materials_table():
@@ -2019,9 +2060,12 @@ async def import_works(file: UploadFile = File(...)):
                     continue
                 
                 # Преобразуем данные
+                normalized_category = str(category).strip()
+                await ensure_category_exists_in_db(normalized_category)
+
                 work_data = {
                     'name': str(name).strip(),
-                    'category': str(category).strip(),
+                    'category': normalized_category,
                     'unit': str(unit).strip(),
                     'balance': float(balance) if balance else 0,
                     'project_total': float(project_total) if project_total else 0,
