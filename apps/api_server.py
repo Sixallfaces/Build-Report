@@ -818,7 +818,6 @@ async def ensure_category_exists_in_db(category_name: str) -> Optional[int]:
                 row = await cursor.fetchone()
                 if row:
                     return row[0]
-
             try:
                 await db.execute(
                     "INSERT INTO categories (name, created_date) VALUES (?, ?)",
