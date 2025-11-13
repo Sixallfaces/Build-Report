@@ -571,7 +571,7 @@
             transition: opacity 0.3s ease-out;
         }
         
-        /* Модальное окно для категорий */
+        /* Модальное окно для разделов */
         .modal {
             display: none;
             position: fixed;
@@ -844,7 +844,7 @@
             padding: 10px 0;
         }
 
-        /* Стили для списка категорий в модальном окне */
+        /* Стили для списка разделов в модальном окне */
         .categories-list {
             border: 1px solid var(--secondary);
             border-radius: 6px;
@@ -1028,19 +1028,19 @@
         </div>
     </div>
 
-    <!-- МОДАЛЬНОЕ ОКНО ДЛЯ УПРАВЛЕНИЯ КАТЕГОРИЯМИ -->
+    <!-- МОДАЛЬНОЕ ОКНО ДЛЯ УПРАВЛЕНИЯ РАЗДЕЛАМИ -->
     <div id="categoryModal" class="modal">
         <div class="modal-content">
             <h3 class="modal-title">Разделы проектов</h3>
             
-            <!-- Список существующих категорий -->
+            <!-- Список существующих разделов -->
             <div class="categories-list" id="categoriesList">
-                <!-- Категории будут загружаться здесь -->
+                <!-- Разделы будут загружаться здесь -->
             </div>
             
-            <!-- Форма добавления новой категории -->
+            <!-- Форма добавления нового раздела -->
             <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-                <input type="text" id="newCategoryName" class="login-input" placeholder="Название новой категории" style="flex: 1;">
+                <input type="text" id="newCategoryName" class="login-input" placeholder="Название нового раздела" style="flex: 1;">
                 <button onclick="saveNewCategory()" class="success">Добавить</button>
             </div>
             
@@ -1050,7 +1050,7 @@
         </div>
     </div>
 
-    <!-- Добавить после модального окна категорий -->
+    <!-- Добавить после модального окна разделов -->
     <div id="addBalanceModal" class="modal">
         <div class="modal-content">
             <h3 class="modal-title">Добавить к балансу</h3>
@@ -1133,7 +1133,7 @@
                     <tr>
                         <th>Материал</th>
                         <th>Ед. изм.</th>
-                        <th>Категория</th>
+                        <th>Раздел</th>
                         <th>На складе</th>
                         <th>Расход на 1 ед.</th>
                         <th>Действия</th>
@@ -1379,7 +1379,7 @@
                         <thead>
                             <tr>
                                 <th class="sortable">ID</th>
-                                <th class="sortable">Категория</th>
+                                <th class="sortable">Раздел</th>
                                 <th class="sortable">Наименование</th>
                                 <th class="sortable">Ед. изм.</th>
                                 <th class="sortable">Кол-во</th>
@@ -1506,7 +1506,7 @@
                     <button id="refreshAccumulative" class="secondary">🔄 Обновить</button>
                     <button id="exportAccumulative" class="secondary">📥 Скачать XLS</button>
                     <div class="search-box">
-                        <input type="text" id="searchAccumulative" placeholder="Поиск по категории или работе...">
+                    <input type="text" id="searchAccumulative" placeholder="Поиск по разделам или работе...">
                     </div>
                 </div>
                 
@@ -2477,8 +2477,9 @@
         const options = ['<option value="">Выберите работу</option>'];
 
         availableReportWorks.forEach(item => {
-            const category = item['Категория'] ? ` — ${item['Категория']}` : '';
-            options.push(`<option value="${item.id}">${item['Название работы'] || item.id}${category}</option>`);
+            const sectionName = item['Раздел'] || item['Категория'] || '';
+            const categoryLabel = sectionName ? ` — ${sectionName}` : '';
+            options.push(`<option value="${item.id}">${item['Название работы'] || item.id}${categoryLabel}</option>`);
         });
 
         selectElement.innerHTML = options.join('');
@@ -2535,7 +2536,7 @@
         const formattedBalance = Number.isFinite(balanceNumber)
             ? balanceNumber.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
             : balanceRaw;
-        const category = work['Категория'] || '—';
+        const category = work['Раздел'] || work['Категория'] || '—';
 
         if (detailsElement) {
             detailsElement.textContent = `Раздел: ${category} • На балансе: ${formattedBalance} ${unit}`;
@@ -2965,7 +2966,8 @@
                 .slice()
                 .sort((a, b) => (a['Название работы'] || '').localeCompare(b['Название работы'] || ''))
                 .map(item => {
-                    const category = item['Категория'] ? ` • ${item['Категория']}` : '';
+                    const sectionName = item['Раздел'] || item['Категория'] || '';
+                    const category = sectionName ? ` • ${sectionName}` : '';
                     return `<option value="${item.id}">${item['Название работы'] || item.id}${category}</option>`;
                 })
         );
@@ -3019,7 +3021,7 @@
         const formattedBalance = Number.isFinite(balanceNumber)
             ? balanceNumber.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
             : (balanceRaw || '0');
-        const category = work['Категория'] || '—';
+        const category = work['Раздел'] || work['Категория'] || '—';
 
         if (detailsElement) {
             detailsElement.textContent = `Раздел: ${category} • На балансе: ${formattedBalance} ${unit}`;
@@ -3264,6 +3266,13 @@
         }
         
         worksToDisplay.forEach(work => {
+            const sectionName = work.Раздел || work['Категория'] || '';
+            const categoryOptions = categories.map(cat =>
+                `<option value="${cat.name}" ${cat.name === sectionName ? 'selected' : ''}>${cat.name}</option>`
+            ).join('');
+            const fallbackCategoryOption = sectionName && !categories.find(c => c.name === sectionName)
+                ? `<option value="${sectionName}" selected>${sectionName}</option>`
+                : '';
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td class="checkbox-cell">
@@ -3272,10 +3281,8 @@
                 <td><input type="text" value="${work.id}" readonly></td>
                 <td>
                     <select class="editable" data-field="category">
-                        ${categories.map(cat =>
-                            `<option value="${cat.name}" ${cat.name === work.Категория ? 'selected' : ''}>${cat.name}</option>`
-                        ).join('')}
-                        <option value="${work.Категория}" ${!categories.find(c => c.name === work.Категория) ? 'selected' : ''}>${work.Категория}</option>
+                        ${categoryOptions}
+                        ${fallbackCategoryOption}
                     </select>
                 </td>
                 <td><input type="text" value="${work['Название работы']}" class="editable" data-field="name"></td>
@@ -4298,10 +4305,10 @@
     async function checkIfWorkExists(workName, category, maxAttempts = 5) {
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
             await loadWorks();
-            const exists = works.some(work => 
-                work['Название работы'] === workName && 
-                work.Категория === category
-            );
+            const exists = works.some(work => {
+                const sectionName = work.Раздел || work['Категория'] || '';
+                return work['Название работы'] === workName && sectionName === category;
+            });
             if (exists) return true;
             await new Promise(resolve => setTimeout(resolve, 500));
         }
@@ -4357,9 +4364,10 @@
             const updatedWork = works.find(work => work.id === workId);
             
             if (updatedWork) {
-                const isUpdated = 
+                const updatedSection = updatedWork.Раздел || updatedWork['Категория'] || '';
+                const isUpdated =
                     updatedWork['Название работы'] === workData.name &&
-                    updatedWork.Категория === workData.category &&
+                    updatedSection === workData.category &&
                     updatedWork['Единица измерения'] === workData.unit &&
                     parseFloat(updatedWork['На балансе']) === workData.balance &&
                     parseFloat(updatedWork['Проект'] || 0) === workData.project_total &&
@@ -4487,11 +4495,14 @@
     // Фильтрация работ
     function filterWorks() {
         const searchTerm = document.getElementById('searchWorks').value.toLowerCase();
-        const filteredWorks = works.filter(work => 
-            work['Название работы'].toLowerCase().includes(searchTerm) ||
-            work.Категория.toLowerCase().includes(searchTerm) ||
-            work['Единица измерения'].toLowerCase().includes(searchTerm)
-        );
+        const filteredWorks = works.filter(work => {
+            const sectionValue = (work.Раздел || work['Категория'] || '').toLowerCase();
+            return (
+                work['Название работы'].toLowerCase().includes(searchTerm) ||
+                sectionValue.includes(searchTerm) ||
+                work['Единица измерения'].toLowerCase().includes(searchTerm)
+            );
+        });
         displayWorks(filteredWorks);
     }
     
@@ -4511,7 +4522,7 @@
             const exportData = works.map(work => ({
                 'ID': work.id,
                 'Название работы': work['Название работы'],
-                'Категория': work.Категория,
+                'Раздел': work.Раздел || work['Категория'] || '',
                 'Единица измерения': work['Единица измерения'],
                 'На балансе': work['На балансе'],
                 'Проект': work['Проект'] || 0,
@@ -4523,7 +4534,7 @@
             const colWidths = [
                 { wch: 8 },   // ID
                 { wch: 40 },  // Название работы
-                { wch: 20 },  // Категория
+                { wch: 20 },  // Раздел
                 { wch: 15 },  // Единица измерения
                 { wch: 12 },  // На балансе
                 { wch: 12 },  // Проект
@@ -4598,14 +4609,16 @@
         for (let i = 0; i < excelData.length; i++) {
             const row = excelData[i];
             try {
-                if (!row['Название работы'] || !row['Категория'] || !row['Единица измерения']) {
+                const rawSection = row['Раздел'] ?? row['Категория'];
+                if (!row['Название работы'] || !rawSection || !row['Единица измерения']) {
                     errors.push(`Строка ${i + 2}: Отсутствуют обязательные поля`);
                     continue;
                 }
 
+                const sectionName = String(rawSection).trim();
                 const workData = {
                     name: String(row['Название работы']).trim(),
-                    category: String(row['Категория']).trim(),
+                    category: sectionName,
                     unit: String(row['Единица измерения']).trim(),
                     balance: parseFloat(row['На балансе']) || 0,
                     project_total: parseFloat(row['Проект']) || 0,
@@ -5070,7 +5083,7 @@
 
             item.innerHTML = `
                 <div class="modal-form-group">
-                    <label>Категория</label>
+                    <label>Раздел</label>
                     <select class="editable" data-field="category"></select>
                 </div>
                 <div class="modal-form-group">
@@ -5089,7 +5102,7 @@
             `;
 
             const categorySelect = item.querySelector('select[data-field="category"]');
-            populateSelect(categorySelect, availableCategories, initialData.category || '', 'Выберите категорию');
+            populateSelect(categorySelect, availableCategories, initialData.category || '', 'Выберите раздел');
 
             const unitSelect = item.querySelector('select[data-field="unit"]');
             populateSelect(unitSelect, availableUnits, initialData.unit || '', 'Выберите единицу измерения');
@@ -5150,7 +5163,7 @@
                 const quantity = parseFloat(quantityInput?.value || '0') || 0;
 
                 if (!category) {
-                    showNotification('Выберите категорию для материала', 'error');
+                    showNotification('Выберите раздел для материала', 'error');
                     categorySelect.focus();
                     return;
                 }
@@ -5419,10 +5432,10 @@
                     displayForemanSectionsList();
                 }
             } else {
-                showNotification('Ошибка при загрузке категорий: ' + data.error, 'error');
+                showNotification('Ошибка при загрузке разделов: ' + data.error, 'error');
             }
         } catch (error) {
-            showNotification('Ошибка при загрузке категорий: ' + error.message, 'error');
+            showNotification('Ошибка при загрузке разделов: ' + error.message, 'error');
         }
     }
     
@@ -5431,7 +5444,7 @@
         categoriesList.innerHTML = '';
         
         if (categories.length === 0) {
-            categoriesList.innerHTML = '<div style="text-align: center; color: var(--accent); opacity: 0.7;">Нет категорий</div>';
+            categoriesList.innerHTML = '<div style="text-align: center; color: var(--accent); opacity: 0.7;">Нет разделов</div>';
             return;
         }
         
@@ -5460,12 +5473,12 @@
     async function saveNewCategory() {
         const categoryName = document.getElementById('newCategoryName').value.trim();
         if (!categoryName) {
-            showNotification('Введите название категории', 'error');
+            showNotification('Введите название раздела', 'error');
             return;
         }
-        
+
         try {
-            showNotification('Добавление категории...', 'success');
+            showNotification('Добавление раздела...', 'success');
             const response = await fetch(buildApiUrl(API_CONFIG.ENDPOINTS.CATEGORIES), {
                 method: 'POST',
                 headers: {
@@ -5478,14 +5491,14 @@
             const categoryAdded = await checkIfCategoryExists(categoryName);
             
             if (categoryAdded) {
-                showNotification('Категория успешно добавлена', 'success');
+                showNotification('Раздел успешно добавлен', 'success');
                 document.getElementById('newCategoryName').value = '';
                 displayCategoriesInModal();
                 if (document.getElementById('works').classList.contains('active')) {
                     await loadWorks();
                 }
             } else {
-                let errorMessage = 'Категория не была добавлена в базу данных';
+                let errorMessage = 'Раздел не был добавлен в базу данных';
                 try {
                     const errorText = await response.text();
                     if (errorText) {
@@ -5496,7 +5509,7 @@
                 showNotification(`Ошибка: ${errorMessage}`, 'error');
             }
         } catch (error) {
-            showNotification('Ошибка при добавлении категории: ' + error.message, 'error');
+            showNotification('Ошибка при добавлении раздела: ' + error.message, 'error');
         }
     }
 
@@ -5511,7 +5524,7 @@
     }
     
     async function deleteCategory(categoryId) {
-        if (!confirm('Вы уверены, что хотите удалить эту категорию?')) {
+        if (!confirm('Вы уверены, что хотите удалить этот раздел?')) {
             return;
         }
         
@@ -5533,13 +5546,13 @@
             const categoryStillExists = categories.some(cat => cat.id === categoryId);
             
             if (!categoryStillExists) {
-                showNotification('Категория успешно удалена', 'success');
+                showNotification('Раздел успешно удален', 'success');
                 displayCategoriesInModal();
                 if (document.getElementById('works').classList.contains('active')) {
                     await loadWorks();
                 }
             } else {
-                let errorMessage = 'Категория не была удалена из базы данных';
+                let errorMessage = 'Раздел не был удален из базы данных';
                 try {
                     const errorText = await response.text();
                     if (errorText) {
@@ -5550,7 +5563,7 @@
                 showNotification(`Ошибка: ${errorMessage}`, 'error');
             }
         } catch (error) {
-            showNotification('Ошибка при удалении категории: ' + error.message, 'error');
+            showNotification('Ошибка при удалении раздела: ' + error.message, 'error');
         }
     }
 
@@ -5944,7 +5957,7 @@
 
         const category = categories.find(cat => cat.id === categoryId);
         if (!category) {
-            showNotification('Раздел не найден в списке категорий', 'error');
+            showNotification('Раздел не найден в списке разделов', 'error');
             return;
         }
 
@@ -6239,12 +6252,13 @@
         }
 
         data.forEach(item => {
+            const sectionName = item.Раздел || item.Категория || '';
             const row = document.createElement('tr');
             const quantityValue = Number(item.Количество);
             const projectValue = Number(item.Проект);
             const percentValue = Number(item['%Выполнения']);
             row.innerHTML = `
-                <td>${item.Категория}</td>
+                <td>${sectionName}</td>
                 <td>${item.Работа}</td>
                 <td>${item['Единица измерения']}</td>
                 <td data-sort-value="${Number.isFinite(quantityValue) ? quantityValue : ''}">${item.Количество}</td>
@@ -6259,10 +6273,10 @@
 
     function filterAccumulative() {
         const searchTerm = document.getElementById('searchAccumulative').value.toLowerCase();
-        const filteredData = accumulativeData.filter(item =>
-            item.Категория.toLowerCase().includes(searchTerm) ||
-            item.Работа.toLowerCase().includes(searchTerm)
-        );
+        const filteredData = accumulativeData.filter(item => {
+            const sectionValue = (item.Раздел || item.Категория || '').toLowerCase();
+            return sectionValue.includes(searchTerm) || item.Работа.toLowerCase().includes(searchTerm);
+        });
         displayAccumulativeStatement(filteredData);
     }
 
@@ -6279,7 +6293,7 @@
             };
 
             const exportData = accumulativeData.map(item => ({
-                'Категория': item.Категория,
+                'Раздел': item.Раздел || item.Категория || '',
                 'Работа': item.Работа,
                 'Единица измерения': item['Единица измерения'],
                 'Количество': item.Количество,

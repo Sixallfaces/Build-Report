@@ -218,7 +218,7 @@ async def ensure_foreman_sections_table():
 
 
 async def ensure_categories_table():
-    """Гарантирует наличие таблицы категорий."""
+    """Гарантирует наличие таблицы разделов."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
@@ -312,7 +312,7 @@ async def get_active_works(foreman_id: Optional[int] = None):
                     works.append({
                         'id': work_id,
                         'Название работы': name,
-                        'Категория': category,
+                        'Раздел': category,
                         'Единица измерения': unit,
                         'На балансе': balance,
                         'Проект': project_total,
@@ -579,7 +579,7 @@ async def get_accumulative_statement():
             # Суммируем все выполненные работы из отчетов и добавляем проектное количество
             async with db.execute('''
                 SELECT 
-                    w.category AS Категория,
+                    w.category AS Раздел,
                     w.name AS Работа,
                     w.unit AS Единица_измерения,
                     SUM(wr.quantity) AS Количество,
@@ -599,7 +599,7 @@ async def get_accumulative_statement():
                 for row in rows:
                     category, work, unit, quantity, project_total, percentage = row
                     accumulative_data.append({
-                        'Категория': category,
+                        'Раздел': category,
                         'Работа': work,
                         'Единица измерения': unit,
                         'Количество': quantity,
@@ -859,7 +859,7 @@ def get_main_keyboard(user_id: int):
 def build_category_map(works):
     category_map = {}
     for work in works:
-        raw_category = (work.get('Категория') or '').strip()
+        raw_category = (work.get('Раздел') or '').strip()
         display_category = raw_category if raw_category else 'Без раздела'
         category_map.setdefault(display_category, []).append(work)
     return category_map
@@ -1062,7 +1062,7 @@ async def handle_main_menu(message: types.Message, state: FSMContext):
         works = await get_active_works(user_id)
         if works:
             works_list = "\n".join([
-                f"• {work['Название работы']} ({work.get('Категория', 'N/A')}) - "
+                f"• {work['Название работы']} ({work.get('Раздел', 'N/A')}) - "
                 f"{work.get('На балансе', 0)} {work.get('Единица измерения', 'шт')} | "
                 f"Проект: {work.get('Проект', 0)} {work.get('Единица измерения', 'шт')}"
                 for work in works
@@ -1335,17 +1335,17 @@ async def handle_work_selection(message: types.Message, state: FSMContext):
         await state.update_data(selected_work_id=work_id, selected_work_name=selected_work['Название работы']) # Сохраняем ID
         unit = selected_work.get('Единица измерения', 'шт')
         balance = selected_work.get('На балансе', 0)
-        category = selected_work.get('Категория', '')
+        category = selected_work.get('Раздел', '')
         await message.answer(
             f"🏗 Выбрана работа: {selected_work['Название работы']}\n"
-            f"📁 Категория: {category}\n"
+            f"📁 Раздел: {category}\n"
             f"📊 Доступно: {balance} {unit}\n"
             f"Введите количество ({unit}):",
             reply_markup=get_back_keyboard()
         )
         await state.set_state(Form.entering_work_quantity)
     else:
-        available = "\n".join([f"• {w['Название работы']} ({w.get('Категория', '')})" for w in works])
+        available = "\n".join([f"• {w['Название работы']} ({w.get('Раздел', '')})" for w in works])
         await message.answer(f"❌ Работа '{message.text}' не найдена.\nДоступные работы:\n{available}")
 
 @dp.message(Form.entering_work_quantity)

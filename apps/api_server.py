@@ -289,7 +289,7 @@ async def get_active_works_from_db():
                     works.append({
                         'id': work_id,
                         'Название работы': name,
-                        'Категория': category,
+                        'Раздел': category,
                         'Единица измерения': unit,
                         'На балансе': balance,
                         'Проект': project_total,  # НОВОЕ ПОЛЕ
@@ -330,7 +330,7 @@ async def get_all_works_from_db():
                     works.append({
                         'id': work_id,
                         'Название работы': name,
-                        'Категория': category,
+                        'Раздел': category,
                         'Единица измерения': unit,
                         'На балансе': balance,
                         'Проект': project_total,  # НОВОЕ ПОЛЕ
@@ -371,7 +371,7 @@ async def get_work_by_id(work_id: int):
                     return {
                         'id': work_id,
                         'Название работы': name,
-                        'Категория': category,
+                        'Раздел': category,
                         'Единица измерения': unit,
                         'На балансе': balance,
                         'Проект': project_total,  # НОВОЕ ПОЛЕ
@@ -390,6 +390,7 @@ async def insert_work_to_db(work_data: dict):
     """Добавляет новую работу в базу данных."""
     try:
         logger.info(f"DEBUG: insert_work_to_db пытается вставить: {work_data}")
+        await ensure_category_exists_in_db(work_data.get('category'))
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
                 "INSERT INTO works (name, category, unit, balance, project_total, is_active, "
@@ -420,6 +421,7 @@ async def insert_work_to_db(work_data: dict):
 async def update_work_in_db(work_id: int, work_data: dict):
     """Обновляет существующую работу в базе данных."""
     try:
+        await ensure_category_exists_in_db(work_data.get('category'))
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
                 "UPDATE works SET name = ?, category = ?, unit = ?, balance = ?, project_total = ?, "
@@ -750,9 +752,9 @@ async def foreman_exists(foreman_id: int) -> bool:
         logger.error(f"⚠️ Ошибка проверки существования бригадира {foreman_id}: {exc}")
         return False
 
-# ========== ФУНКЦИИ ДЛЯ КАТЕГОРИЙ ==========
+# ========== ФУНКЦИИ ДЛЯ РАЗДЕЛОВ ==========
 async def init_categories_table():
-    """Создает таблицу для категорий"""
+    """Создает таблицу для разделов"""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('''
             CREATE TABLE IF NOT EXISTS categories (
@@ -764,7 +766,7 @@ async def init_categories_table():
         await db.commit()
 
 async def get_categories_from_db():
-    """Получает список всех категорий из базы данных."""
+    """Получает список всех разделов из базы данных."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
@@ -779,14 +781,14 @@ async def get_categories_from_db():
                         'name': name,
                         'created_date': created_date
                     })
-                logger.info(f"📂 Найдено категорий в БД: {len(categories)}")
+                logger.info(f"📂 Найдено разделов в БД: {len(categories)}")
                 return categories
     except Exception as e:
-        logger.error(f"⚠️ Ошибка получения категорий: {e}")
+        logger.error(f"⚠️ Ошибка получения разделов: {e}")
         return []
 
 async def create_category_in_db(category_data: dict):
-    """Добавляет новую категорию в базу данных."""
+    """Добавляет новый раздел в базу данных."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
@@ -795,16 +797,16 @@ async def create_category_in_db(category_data: dict):
             )
             await db.commit()
             category_id = db.last_insert_rowid()
-            logger.info(f"📂 Добавлена новая категория: {category_data['name']} (ID: {category_id})")
+            logger.info(f"📂 Добавлен новый раздел: {category_data['name']} (ID: {category_id})")
             return category_id
     except aiosqlite.IntegrityError:
-        raise HTTPException(status_code=400, detail="Категория с таким названием уже существует")
+        raise HTTPException(status_code=400, detail="Раздел с таким названием уже существует")
     except Exception as e:
-        logger.error(f"⚠️ Ошибка добавления категории: {e}")
+        logger.error(f"⚠️ Ошибка добавления раздела: {e}")
         return None
 
 async def ensure_category_exists_in_db(category_name: str) -> Optional[int]:
-    """Гарантирует наличие категории/раздела в базе данных."""
+    """Гарантирует наличие раздела в базе данных."""
     normalized_name = (category_name or '').strip()
     if not normalized_name:
         return None
@@ -840,7 +842,7 @@ async def ensure_category_exists_in_db(category_name: str) -> Optional[int]:
                     if retry_row:
                         return retry_row[0]
     except Exception as exc:
-        logger.error(f"⚠️ Ошибка гарантии наличия категории '{normalized_name}': {exc}")
+        logger.error(f"⚠️ Ошибка гарантии наличия раздела '{normalized_name}': {exc}")
     return None
     
     # ========== ФУНКЦИИ ДЛЯ МАТЕРИАЛОВ ==========
@@ -1329,26 +1331,26 @@ async def delete_material_from_db(material_id: int):
         return False
 
 async def delete_category_from_db(category_id: int):
-    """Удаляет категорию из базы данных."""
+    """Удаляет раздел из базы данных."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            # Проверяем, используются ли категории в работах
+            # Проверяем, используются ли разделы в работах
             async with db.execute(
                 "SELECT COUNT(*) FROM works WHERE category = (SELECT name FROM categories WHERE id = ?)", 
                 (category_id,)
             ) as cursor:
                 usage_count = await cursor.fetchone()
                 if usage_count and usage_count[0] > 0:
-                    return False, "Нельзя удалить категорию, которая используется в работах"
+                    return False, "Нельзя удалить раздел, который используется в работах"
             
             await db.execute("DELETE FROM categories WHERE id = ?", (category_id,))
             await db.commit()
             if db.rowcount > 0:
-                logger.info(f"🗑️ Удалена категория ID: {category_id}")
-                return True, "Категория успешно удалена"
-        return False, "Категория не найдена"
+                logger.info(f"🗑️ Удален раздел ID: {category_id}")
+                return True, "Раздел успешно удален"
+        return False, "Раздел не найден"
     except Exception as e:
-        logger.error(f"⚠️ Ошибка удаления категории ID {category_id}: {e}")
+        logger.error(f"⚠️ Ошибка удаления раздела ID {category_id}: {e}")
         return False, f"Ошибка удаления: {str(e)}"
 
 # ========== ФУНКЦИИ ДЛЯ ОТЧЕТОВ ==========
@@ -1996,7 +1998,7 @@ async def export_works():
         ws.title = "Работы"
         
         # Заголовки
-        headers = ["ID", "Название работы", "Категория", "Единица измерения", "На балансе", "Проект", "Активна"]
+        headers = ["ID", "Название работы", "Раздел", "Единица измерения", "На балансе", "Проект", "Активна"]
         ws.append(headers)
         
         # Данные
@@ -2004,7 +2006,7 @@ async def export_works():
             row = [
                 work['id'],
                 work['Название работы'],
-                work['Категория'],
+                work['Раздел'],
                 work['Единица измерения'],
                 work['На балансе'],
                 work['Проект'],
@@ -2113,7 +2115,7 @@ async def export_materials():
         ws = wb.active
         ws.title = "Материалы"
 
-        headers = ["ID", "Категория", "Название материала", "Единица измерения", "Количество"]
+        headers = ["ID", "Раздел", "Название материала", "Единица измерения", "Количество"]
         ws.append(headers)
 
         for material in materials:
@@ -2148,9 +2150,9 @@ async def download_materials_template():
         ws = wb.active
         ws.title = "Материалы"
 
-        headers = ["ID", "Категория", "Название материала", "Единица измерения", "Количество"]
+        headers = ["ID", "Раздел", "Название материала", "Единица измерения", "Количество"]
         ws.append(headers)
-        ws.append(["", "Категория", "Пример материала", "шт", 0])
+        ws.append(["", "Раздел", "Пример материала", "шт", 0])
 
         file_stream = io.BytesIO()
         wb.save(file_stream)
@@ -2298,40 +2300,40 @@ async def login_site_user(request: Request):
 # ========== ЭНДПОИНТЫ ДЛЯ КАТЕГОРИЙ ==========
 @app.get("/api/categories")
 async def get_categories():
-    """Получает все категории."""
+    """Получает все разделы."""
     categories = await get_categories_from_db()
     return {"success": True, "data": categories}
 
 @app.post("/api/categories")
 async def create_category(request: Request):
-    """Создает новую категорию."""
+    """Создает новый раздел."""
     try:
         category_data = await request.json()
         
         if 'name' not in category_data or not category_data['name'].strip():
-            raise HTTPException(status_code=400, detail="Отсутствует название категории")
+            raise HTTPException(status_code=400, detail="Отсутствует название раздела")
         
         category_id = await create_category_in_db(category_data)
         if category_id is not None:
-            return {"success": True, "message": "Категория успешно добавлена", "data": {"id": category_id}}
+            return {"success": True, "message": "Раздел успешно добавлен", "data": {"id": category_id}}
         else:
-            raise HTTPException(status_code=500, detail="Ошибка при добавлении категории в БД")
+            raise HTTPException(status_code=500, detail="Ошибка при добавлении раздела в БД")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Ошибка при создании категории: {e}")
+        logger.error(f"❌ Ошибка при создании раздела: {e}")
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
 
 @app.delete("/api/categories/{category_id}")
 async def delete_category(category_id: int):
-    """Удаляет категорию."""
+    """Удаляет раздел."""
     success, message = await delete_category_from_db(category_id)
     if success:
         return {"success": True, "message": message}
     else:
         raise HTTPException(status_code=400, detail=message)
 
-# Обновляем функцию startup_event для инициализации таблицы категорий
+#Обновляем функцию startup_event для инициализации таблицы разделов
 @app.on_event("startup")
 async def startup_event():
     await init_site_users_table()
@@ -3140,7 +3142,7 @@ async def get_accumulative_statement():
             # Суммируем все выполненные работы из отчетов
             async with db.execute('''
                 SELECT 
-                    w.category AS Категория,
+                    w.category AS Раздел,
                     w.name AS Работа,
                     w.unit AS Единица_измерения,
                     SUM(wr.quantity) AS Количество,
@@ -3160,7 +3162,7 @@ async def get_accumulative_statement():
                 for row in rows:
                     category, work, unit, quantity, project_total, percentage = row
                     accumulative_data.append({
-                        'Категория': category,
+                        'Раздел': category,
                         'Работа': work,
                         'Единица измерения': unit,
                         'Количество': quantity,
