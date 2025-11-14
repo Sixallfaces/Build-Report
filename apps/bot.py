@@ -647,8 +647,8 @@ def sanitize_public_url(public_url: Optional[str]) -> Optional[str]:
         return public_url
 
     cleaned = public_url.strip()
-    # Ищем первую ссылку до повторного появления http/https
-    match = re.match(r'https?://.+?(?=https?://|$)', cleaned)
+    # Ищем первую ссылку до повторного появления http/https (допускаем одинарный или двойной слэш)
+    match = re.match(r'https?://.+?(?=https?:/{1,2}|$)', cleaned)
     if match:
         return match.group(0)
 
