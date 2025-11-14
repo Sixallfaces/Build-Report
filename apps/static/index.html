@@ -865,13 +865,33 @@
             border-radius: 4px;
             border: 1px solid var(--secondary);
             transition: all 0.3s ease;
+            gap: 10px;
         }
-        
+
         .category-item:hover {
             background: rgba(84, 176, 165, 0.1);
             transform: translateX(5px);
         }
-        
+
+        .category-item .category-name {
+            flex: 1;
+            color: var(--light);
+        }
+
+        .category-item .category-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .category-item.editing {
+            background: rgba(84, 176, 165, 0.1);
+        }
+
+        .category-item.editing input[type="text"] {
+            flex: 1;
+            margin-right: 10px;
+        }
+
         .category-item button {
             margin: 0;
             padding: 5px 10px;
@@ -5451,14 +5471,35 @@
         categories.forEach(category => {
             const categoryItem = document.createElement('div');
             categoryItem.className = 'category-item';
-            categoryItem.innerHTML = `
-                <span>${category.name}</span>
-                <button onclick="deleteCategory(${category.id})" class="danger">🗑️</button>
-            `;
+            categoryItem.dataset.categoryId = category.id;
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'category-name';
+            nameSpan.textContent = category.name;
+
+            const actionsContainer = document.createElement('div');
+            actionsContainer.className = 'category-actions';
+
+            const editButton = document.createElement('button');
+            editButton.className = 'secondary';
+            editButton.textContent = '✏️';
+            editButton.addEventListener('click', () => startEditCategory(category.id));
+
+            const deleteButton = document.createElement('button');
+            deleteButton.className = 'danger';
+            deleteButton.textContent = '🗑️';
+            deleteButton.addEventListener('click', () => deleteCategory(category.id));
+
+            actionsContainer.appendChild(editButton);
+            actionsContainer.appendChild(deleteButton);
+
+            categoryItem.appendChild(nameSpan);
+            categoryItem.appendChild(actionsContainer);
+
             categoriesList.appendChild(categoryItem);
         });
     }
-    
+
     function openCategoryModal() {
         displayCategoriesInModal();
         document.getElementById('categoryModal').style.display = 'flex';
@@ -5469,7 +5510,116 @@
     function closeCategoryModal() {
         document.getElementById('categoryModal').style.display = 'none';
     }
-    
+
+    function startEditCategory(categoryId) {
+        const categoryItem = document.querySelector(`.category-item[data-category-id="${categoryId}"]`);
+        if (!categoryItem) {
+            return;
+        }
+
+        const category = categories.find(cat => cat.id === categoryId);
+        if (!category) {
+            return;
+        }
+
+        categoryItem.classList.add('editing');
+        categoryItem.innerHTML = '';
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = category.name;
+        input.className = 'login-input';
+        input.setAttribute('data-category-edit', 'true');
+
+        const actionsContainer = document.createElement('div');
+        actionsContainer.className = 'category-actions';
+
+        const saveButton = document.createElement('button');
+        saveButton.className = 'success';
+        saveButton.textContent = '💾';
+        saveButton.addEventListener('click', () => confirmEditCategory(categoryId));
+
+        const cancelButton = document.createElement('button');
+        cancelButton.className = 'secondary';
+        cancelButton.textContent = '↩️';
+        cancelButton.addEventListener('click', () => cancelEditCategory(categoryId));
+
+        actionsContainer.appendChild(saveButton);
+        actionsContainer.appendChild(cancelButton);
+
+        categoryItem.appendChild(input);
+        categoryItem.appendChild(actionsContainer);
+
+        input.focus();
+        input.select();
+
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                confirmEditCategory(categoryId);
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                cancelEditCategory(categoryId);
+            }
+        });
+    }
+
+    function cancelEditCategory(categoryId) {
+        displayCategoriesInModal();
+        const list = document.getElementById('categoriesList');
+        if (list) {
+            const item = list.querySelector(`.category-item[data-category-id="${categoryId}"] input[data-category-edit]`);
+            if (item) {
+                item.blur();
+            }
+        }
+    }
+
+    async function confirmEditCategory(categoryId) {
+        const category = categories.find(cat => cat.id === categoryId);
+        if (!category) {
+            return;
+        }
+
+        const categoryItem = document.querySelector(`.category-item[data-category-id="${categoryId}"]`);
+        const input = categoryItem ? categoryItem.querySelector('input[data-category-edit]') : null;
+        const newName = input ? input.value.trim() : '';
+
+        if (!newName) {
+            showNotification('Введите название раздела', 'error');
+            if (input) {
+                input.focus();
+            }
+            return;
+        }
+
+        if (category.name === newName) {
+            displayCategoriesInModal();
+            return;
+        }
+
+        try {
+            showNotification('Обновление раздела...', 'success');
+            const response = await makeApiRequest(`${API_CONFIG.ENDPOINTS.CATEGORIES}/${categoryId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ name: newName })
+            });
+
+            if (response && response.success) {
+                showNotification('Раздел успешно обновлен', 'success');
+                await loadCategories();
+                displayCategoriesInModal();
+            } else {
+                const errorMessage = response?.error || response?.detail || 'Не удалось обновить раздел';
+                showNotification(`Ошибка: ${errorMessage}`, 'error');
+                displayCategoriesInModal();
+            }
+        } catch (error) {
+            showNotification('Ошибка при обновлении раздела: ' + error.message, 'error');
+            displayCategoriesInModal();
+        }
+    }
+
     async function saveNewCategory() {
         const categoryName = document.getElementById('newCategoryName').value.trim();
         if (!categoryName) {

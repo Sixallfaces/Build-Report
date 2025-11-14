@@ -804,6 +804,55 @@ async def create_category_in_db(category_data: dict):
     except Exception as e:
         logger.error(f"⚠️ Ошибка добавления раздела: {e}")
         return None
+    
+async def update_category_in_db(category_id: int, new_name: str):
+    """Обновляет название раздела и связанные записи."""
+    normalized_name = (new_name or '').strip()
+    if not normalized_name:
+        return False, "Отсутствует название раздела"
+
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT name FROM categories WHERE id = ?",
+                (category_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                if not row:
+                    return False, "Раздел не найден"
+                current_name = row[0]
+
+            if current_name == normalized_name:
+                return True, "Название раздела не изменилось"
+
+            try:
+                await db.execute(
+                    "UPDATE categories SET name = ? WHERE id = ?",
+                    (normalized_name, category_id),
+                )
+            except aiosqlite.IntegrityError:
+                return False, "Раздел с таким названием уже существует"
+
+            await db.execute(
+                "UPDATE works SET category = ? WHERE category = ?",
+                (normalized_name, current_name),
+            )
+            await db.execute(
+                "UPDATE materials SET category = ? WHERE category = ?",
+                (normalized_name, current_name),
+            )
+            await db.commit()
+
+            logger.info(
+                "✏️ Обновлен раздел ID %s: '%s' → '%s'",
+                category_id,
+                current_name,
+                normalized_name,
+            )
+            return True, "Раздел успешно обновлен"
+    except Exception as exc:
+        logger.error(f"⚠️ Ошибка обновления раздела ID {category_id}: {exc}")
+        return False, f"Ошибка обновления раздела: {str(exc)}"
 
 async def ensure_category_exists_in_db(category_name: str) -> Optional[int]:
     """Гарантирует наличие раздела в базе данных."""
@@ -2323,6 +2372,36 @@ async def create_category(request: Request):
     except Exception as e:
         logger.error(f"❌ Ошибка при создании раздела: {e}")
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
+
+@app.put("/api/categories/{category_id}")
+async def update_category(category_id: int, request: Request):
+    """Обновляет существующий раздел."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Неверный формат JSON")
+
+    if 'name' not in payload or not isinstance(payload['name'], str):
+        raise HTTPException(status_code=400, detail="Отсутствует название раздела")
+
+    normalized_name = payload['name'].strip()
+    if not normalized_name:
+        raise HTTPException(status_code=400, detail="Отсутствует название раздела")
+    success, message = await update_category_in_db(category_id, normalized_name)
+
+    if success:
+        return {
+            "success": True,
+            "message": message,
+            "data": {"id": category_id, "name": normalized_name}
+        }
+
+    if message in {"Отсутствует название раздела", "Раздел с таким названием уже существует"}:
+        raise HTTPException(status_code=400, detail=message)
+    if message == "Раздел не найден":
+        raise HTTPException(status_code=404, detail=message)
+
+    raise HTTPException(status_code=500, detail=message or "Не удалось обновить раздел")
 
 @app.delete("/api/categories/{category_id}")
 async def delete_category(category_id: int):
