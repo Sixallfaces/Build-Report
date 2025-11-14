@@ -640,6 +640,20 @@ def setup_yandex_disk():
         logger.error(traceback.format_exc())
         return False
 
+# Очистка публичных ссылок Яндекс.Диска
+def sanitize_public_url(public_url: Optional[str]) -> Optional[str]:
+    """Удаляет повторно склеенные URL и возвращает первую корректную ссылку."""
+    if not public_url:
+        return public_url
+
+    cleaned = public_url.strip()
+    # Ищем первую ссылку до повторного появления http/https
+    match = re.match(r'https?://.+?(?=https?://|$)', cleaned)
+    if match:
+        return match.group(0)
+
+    return cleaned
+
 # Создание папки на Яндекс.Диске
 def create_yandex_folder(folder_path):
     try:
