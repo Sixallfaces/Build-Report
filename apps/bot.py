@@ -707,7 +707,7 @@ def publish_yandex_folder(folder_path: str) -> str | None:
             params={'path': folder_path, 'fields': 'public_url'}
         )
         if info_response.status_code == 200:
-            public_url = info_response.json().get('public_url')
+            public_url = sanitize_public_url(info_response.json().get('public_url'))
             if public_url:
                 logger.info(f"🔗 Получена публичная ссылка: {public_url}")
                 return public_url
@@ -813,7 +813,7 @@ async def upload_photo_to_yandex(photo_file, folder_path, filename):
                         params={'path': file_path, 'fields': 'public_url'}
                     )
                     if info_response.status_code == 200:
-                        return info_response.json().get('public_url')
+                        return sanitize_public_url(info_response.json().get('public_url'))
                     else:
                         logger.error(f"❌ Ошибка получения public_url после публикации: {info_response.status_code}")
                         # Возвращаем путь к файлу как резервный вариант
