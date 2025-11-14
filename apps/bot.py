@@ -889,6 +889,15 @@ def get_add_more_keyboard():
         resize_keyboard=True
     )
 
+def get_photo_upload_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text='✅ Завершить добавление фото')],
+            [KeyboardButton(text='↩️ Назад')]
+        ],
+        resize_keyboard=True
+    )
+
 def get_people_photo_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -1400,6 +1409,7 @@ async def handle_photo_choice(message: types.Message, state: FSMContext):
 
     if message.text == '↩️ Назад':
         data = await state.get_data()
+        await state.update_data(photo_urls=[], photo_folder_path=None, date_folder_path=None)
         work_id = data.get('work_id', 0) # Получаем ID
         work_name = data.get('work_name', 'Неизвестная работа') # Получаем имя
         # Нужно получить unit и category заново из БД, так как они не сохранены в FSM
@@ -1410,10 +1420,23 @@ async def handle_photo_choice(message: types.Message, state: FSMContext):
         await state.set_state(Form.entering_work_quantity)
         return
     if message.text == '➡️ Пропустить фото':
+        await state.update_data(photo_urls=[], photo_folder_path=None, date_folder_path=None)
         await save_report_with_photo(message, state, photo_url="")
         return
     if message.text == '📸 Прикрепить фото':
-        await message.answer("📸 Пожалуйста, отправьте фотографию выполненной работы:", reply_markup=get_back_keyboard())
+        await state.update_data(photo_urls=[], photo_folder_path=None, date_folder_path=None)
+        await message.answer(
+            "📸 Пожалуйста, отправьте фотографию выполненной работы. \n"
+            "Вы можете прикрепить несколько фотографий, после чего нажмите «✅ Завершить добавление фото».",
+            reply_markup=get_photo_upload_keyboard()
+        )
+        return
+    if message.text == '✅ Завершить добавление фото':
+        data = await state.get_data()
+        photo_urls = data.get('photo_urls', [])
+        joined_urls = "\n".join(photo_urls) if photo_urls else ""
+        await state.update_data(photo_urls=[], photo_folder_path=None, date_folder_path=None)
+        await save_report_with_photo(message, state, photo_url=joined_urls)
         return
     if message.photo:
         try:
@@ -1421,15 +1444,19 @@ async def handle_photo_choice(message: types.Message, state: FSMContext):
             work_id = data.get('work_id', 0) # Получаем ID
             work_name = data.get('work_name', 'Неизвестная работа') # Получаем имя
             quantity = data.get('quantity', 0)
+            photo_urls = data.get('photo_urls', [])
             user_id = message.from_user.id
 
             if not setup_yandex_disk():
                 await message.answer("❌ Ошибка подключения к Яндекс.Диску. Отчет сохранен без фото.")
+                await state.update_data(photo_urls=[], photo_folder_path=None, date_folder_path=None)
                 await save_report_with_photo(message, state, photo_url="")
                 return
 
             create_yandex_folder(YANDEX_DISK_BASE_FOLDER)
-            date_folder = create_date_folder()
+            date_folder = data.get('date_folder_path')
+            if not date_folder:
+                date_folder = create_date_folder()
             if not date_folder:
                 await message.answer("❌ Ошибка создания папки с датой. Отчет сохранен без фото.")
                 await save_report_with_photo(message, state, photo_url="")
@@ -1438,12 +1465,16 @@ async def handle_photo_choice(message: types.Message, state: FSMContext):
             foreman_info = await get_foreman_info(user_id)
             if not foreman_info:
                 await message.answer("❌ Ошибка получения данных. Отчет сохранен без фото.")
+                await state.update_data(photo_urls=[], photo_folder_path=None, date_folder_path=None)
                 await save_report_with_photo(message, state, photo_url="")
                 return
 
-            foreman_folder = create_foreman_folder(date_folder, foreman_info['full_name'], user_id)
+            foreman_folder = data.get('photo_folder_path')
+            if not foreman_folder:
+                foreman_folder = create_foreman_folder(date_folder, foreman_info['full_name'], user_id)
             if not foreman_folder:
                 await message.answer("❌ Ошибка создания папки бригадира. Отчет сохранен без фото.")
+                await state.update_data(photo_urls=[], photo_folder_path=None, date_folder_path=None)
                 await save_report_with_photo(message, state, photo_url="")
                 return
 
@@ -1456,14 +1487,25 @@ async def handle_photo_choice(message: types.Message, state: FSMContext):
 
             if photo_url:
                 await message.answer("✅ Фото успешно загружено!")
+                photo_urls.append(photo_url)
+                await state.update_data(photo_urls=photo_urls, photo_folder_path=foreman_folder, date_folder_path=date_folder)
+                await message.answer(
+                    f"📷 Добавлено фото: {len(photo_urls)} шт.\n"
+                    "Вы можете отправить еще фотографии или нажмите «✅ Завершить добавление фото».",
+                    reply_markup=get_photo_upload_keyboard()
+                )
             else:
                 await message.answer("❌ Ошибка загрузки фото. Отчет сохранен без фото.")
 
-            await save_report_with_photo(message, state, photo_url or "")
+                await state.update_data(photo_urls=[], photo_folder_path=None, date_folder_path=None)
+                await save_report_with_photo(message, state, photo_url="")
+                return
         except Exception as e:
             logger.error(f"❌ Ошибка обработки фото: {e}")
             await message.answer("❌ Ошибка обработки фото. Отчет сохранен без фото.")
+            await state.update_data(photo_urls=[], photo_folder_path=None, date_folder_path=None)
             await save_report_with_photo(message, state, "")
+            return
 
     has_access, error_msg = await check_access(user_id)
     if not has_access:
@@ -1523,7 +1565,12 @@ async def save_report_with_photo(message: types.Message, state: FSMContext, phot
         foreman_info = await get_foreman_info(message.from_user.id)
         photo_text = " с фотоотчетом" if photo_url else ""
         works_list.append({'work_name': work_name, 'quantity': quantity, 'unit': unit, 'photo': photo_text})
-        await state.update_data(works_list=works_list)
+        await state.update_data(
+            works_list=works_list,
+            photo_urls=[],
+            photo_folder_path=None,
+            date_folder_path=None
+        )
         count = len(works_list)
         await message.answer(
             f"✅ Работа добавлена в отчет{photo_text}!\n"
