@@ -3214,11 +3214,16 @@ async def delete_report(report_id: int):
 
 # Накопительная ведомость
 @app.get("/api/accumulative-statement")
-async def get_accumulative_statement():
+async def get_accumulative_statement(foreman_id: Optional[int] = None):
     """Получает накопительную ведомость выполненных работ."""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            # Суммируем все выполненные работы из отчетов
+            params = []
+            foreman_filter = ""
+
+            if foreman_id is not None:
+                foreman_filter = " AND wr.foreman_id = ?"
+                params.append(foreman_id)
             async with db.execute('''
                 SELECT 
                     w.category AS Раздел,
@@ -3232,10 +3237,10 @@ async def get_accumulative_statement():
                     END AS Процент_выполнения
                 FROM work_reports wr
                 JOIN works w ON wr.work_id = w.id
-                WHERE wr.is_verified = 1
+                WHERE wr.is_verified = 1''' + foreman_filter + '''
                 GROUP BY w.category, w.name, w.unit, w.project_total
                 ORDER BY w.category, w.name
-            ''') as cursor:
+            ''', params) as cursor:
                 rows = await cursor.fetchall()
                 accumulative_data = []
                 for row in rows:
@@ -3248,8 +3253,24 @@ async def get_accumulative_statement():
                         'Проект': project_total,
                         '%Выполнения': percentage
                     })
-                logger.info(f"📦 Загружена накопительная ведомость: {len(accumulative_data)} записей")
-                return {"success": True, "data": accumulative_data}
+                async with db.execute('''
+                SELECT DISTINCT f.id, f.first_name, f.last_name
+                FROM work_reports wr
+                JOIN foremen f ON wr.foreman_id = f.id
+                WHERE wr.is_verified = 1
+                ORDER BY f.first_name, f.last_name
+            ''') as cursor:
+                foremen_rows = await cursor.fetchall()
+                available_foremen = [
+                    {
+                        'id': row[0],
+                        'full_name': " ".join(part for part in [row[1], row[2]] if part).strip() or str(row[0])
+                    }
+                    for row in foremen_rows
+                ]
+
+            logger.info(f"📦 Загружена накопительная ведомость: {len(accumulative_data)} записей")
+            return {"success": True, "data": accumulative_data, "foremen": available_foremen}
     except Exception as e:
         logger.error(f"❌ Ошибка получения накопительной ведомости: {e}")
         return {"success": False, "error": str(e)}

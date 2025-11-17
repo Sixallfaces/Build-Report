@@ -448,6 +448,44 @@
             margin-bottom: 20px;
             align-items: center;
         }
+
+        .dropdown {
+            position: relative;
+        }
+
+        .dropdown-menu {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            background: rgba(58, 123, 140, 0.95);
+            border: 1px solid var(--secondary);
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            min-width: 220px;
+            z-index: 10;
+            display: none;
+            overflow: hidden;
+        }
+
+        .dropdown-menu.show {
+            display: block;
+        }
+
+        .dropdown-item {
+            width: 100%;
+            background: transparent;
+            border: none;
+            color: var(--light);
+            padding: 10px 14px;
+            text-align: left;
+            cursor: pointer;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 0.95rem;
+        }
+
+        .dropdown-item:hover {
+            background: rgba(84, 176, 165, 0.2);
+        }
         
         .search-box {
             flex: 1;
@@ -1525,6 +1563,10 @@
                 <div class="toolbar">
                     <button id="refreshAccumulative" class="secondary">🔄 Обновить</button>
                     <button id="exportAccumulative" class="secondary">📥 Скачать XLS</button>
+                    <div class="dropdown" id="accumulativeForemanDropdown">
+                        <button id="foremanFilterButton" class="secondary">👷 Все бригадиры</button>
+                        <div id="foremanDropdownMenu" class="dropdown-menu"></div>
+                    </div>
                     <div class="search-box">
                     <input type="text" id="searchAccumulative" placeholder="Поиск по разделам или работе...">
                     </div>
@@ -1659,6 +1701,8 @@
     let currentForemanIdForSections = null;
     let currentForemanSections = [];
     let currentEditingReportId = null;
+    let accumulativeForemen = [];
+    let selectedAccumulativeForemanId = null;
 
     // Конфигурация сортировки таблиц
     const tableSortStates = new Map();
@@ -6366,20 +6410,26 @@
         document.getElementById('refreshAccumulative').addEventListener('click', loadAccumulativeStatement);
         document.getElementById('exportAccumulative').addEventListener('click', exportAccumulativeToExcel);
         document.getElementById('searchAccumulative').addEventListener('input', filterAccumulative);
+        document.getElementById('foremanFilterButton').addEventListener('click', toggleForemanDropdown);
+        document.addEventListener('click', handleForemanDropdownOutsideClick);
     }
 
     async function loadAccumulativeStatement() {
         const loadingElement = document.getElementById('accumulativeLoading');
         const tableBody = document.getElementById('accumulativeTableBody');
-        
+
         loadingElement.style.display = 'block';
         tableBody.innerHTML = '';
-        
+
         try {
-            const data = await makeApiRequest('/api/accumulative-statement');
-            
+            const query = selectedAccumulativeForemanId ? `?foreman_id=${selectedAccumulativeForemanId}` : '';
+            const data = await makeApiRequest(`/api/accumulative-statement${query}`);
+
             if (data.success) {
                 accumulativeData = data.data || [];
+                accumulativeForemen = data.foremen || [];
+                updateAccumulativeForemanButton();
+                populateForemanDropdown();
                 displayAccumulativeStatement(accumulativeData);
             } else {
                 showNotification('Ошибка при загрузке накопительной ведомости: ' + data.error, 'error');
@@ -6389,6 +6439,74 @@
         } finally {
             loadingElement.style.display = 'none';
         }
+    }
+
+    function updateAccumulativeForemanButton() {
+        const button = document.getElementById('foremanFilterButton');
+        if (!button) {
+            return;
+        }
+
+        const selectedForeman = accumulativeForemen.find(foreman => String(foreman.id) === String(selectedAccumulativeForemanId));
+        const label = selectedForeman ? selectedForeman.full_name : 'Все бригадиры';
+        button.textContent = `👷 ${label}`;
+    }
+
+    function populateForemanDropdown() {
+        const dropdownMenu = document.getElementById('foremanDropdownMenu');
+        if (!dropdownMenu) {
+            return;
+        }
+
+        dropdownMenu.innerHTML = '';
+
+        const allOption = document.createElement('button');
+        allOption.className = 'dropdown-item';
+        allOption.type = 'button';
+        allOption.textContent = 'Все бригадиры';
+        allOption.addEventListener('click', () => selectAccumulativeForeman(null));
+        dropdownMenu.appendChild(allOption);
+
+        accumulativeForemen.forEach(foreman => {
+            const option = document.createElement('button');
+            option.className = 'dropdown-item';
+            option.type = 'button';
+            option.textContent = foreman.full_name || `ID ${foreman.id}`;
+            option.addEventListener('click', () => selectAccumulativeForeman(foreman.id));
+            dropdownMenu.appendChild(option);
+        });
+    }
+
+    function toggleForemanDropdown(event) {
+        event.stopPropagation();
+        const dropdownMenu = document.getElementById('foremanDropdownMenu');
+        if (!dropdownMenu) {
+            return;
+        }
+        dropdownMenu.classList.toggle('show');
+    }
+
+    function handleForemanDropdownOutsideClick(event) {
+        const dropdown = document.getElementById('accumulativeForemanDropdown');
+        const dropdownMenu = document.getElementById('foremanDropdownMenu');
+
+        if (!dropdown || !dropdownMenu) {
+            return;
+        }
+
+        if (!dropdown.contains(event.target)) {
+            dropdownMenu.classList.remove('show');
+        }
+    }
+
+    function selectAccumulativeForeman(foremanId) {
+        selectedAccumulativeForemanId = foremanId;
+        updateAccumulativeForemanButton();
+        const dropdownMenu = document.getElementById('foremanDropdownMenu');
+        if (dropdownMenu) {
+            dropdownMenu.classList.remove('show');
+        }
+        loadAccumulativeStatement();
     }
 
     function displayAccumulativeStatement(data) {
