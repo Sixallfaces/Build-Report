@@ -586,25 +586,43 @@ async def get_accumulative_statement():
                     w.project_total AS Проект,
                     CASE 
                         WHEN w.project_total > 0 THEN ROUND((SUM(wr.quantity) / w.project_total) * 100, 2)
-                        ELSE 0 
-                    END AS Процент_выполнения
+                        ELSE 0
+                    END AS Процент_выполнения,
+                    SUM(wr.quantity * COALESCE(w.unit_cost_without_vat, 0)) AS Сумма_без_НДС
                 FROM work_reports wr
                 JOIN works w ON wr.work_id = w.id
                 WHERE wr.is_verified = 1
-                GROUP BY w.category, w.name, w.unit, w.project_total
+                GROUP BY w.category, w.name, w.unit, w.project_total, w.unit_cost_without_vat
                 ORDER BY w.category, w.name
             ''') as cursor:
                 rows = await cursor.fetchall()
                 accumulative_data = []
                 for row in rows:
-                    category, work, unit, quantity, project_total, percentage = row
+                    (
+                        category,
+                        work,
+                        unit,
+                        unit_cost_without_vat,
+                        quantity,
+                        project_total,
+                        percentage,
+                        total_without_vat,
+                    ) = row
+                    unit_cost_without_vat = unit_cost_without_vat or 0
+                    total_without_vat = total_without_vat or 0
+                    total_with_vat = round(total_without_vat * VAT_MULTIPLIER, 2)
+                    unit_cost_with_vat = round(unit_cost_without_vat * VAT_MULTIPLIER, 2)
                     accumulative_data.append({
                         'Раздел': category,
                         'Работа': work,
                         'Единица измерения': unit,
+                        'Стоимость за единицу (без НДС)': unit_cost_without_vat,
+                        'Стоимость за единицу (с НДС)': unit_cost_with_vat,
                         'Количество': quantity,
                         'Проект': project_total,
-                        '%Выполнения': percentage
+                        '%Выполнения': percentage,
+                        'Сумма (без НДС)': round(total_without_vat, 2),
+                        'Сумма (с НДС)': total_with_vat,
                     })
                 logger.info(f"📦 Загружена накопительная ведомость: {len(accumulative_data)} записей")
                 return accumulative_data

@@ -1582,9 +1582,13 @@
                                 <th class="sortable">Раздел</th>
                                 <th class="sortable">Работа</th>
                                 <th class="sortable">Единица измерения</th>
+                                <th class="sortable">Стоимость за единицу (без НДС)</th>
+                                <th class="sortable">Стоимость за единицу (с НДС)</th>
                                 <th class="sortable">Количество</th>
                                 <th class="sortable">Проект</th>
                                 <th class="sortable">%Выполнения</th>
+                                <th class="sortable">Сумма (без НДС)</th>
+                                <th class="sortable">Сумма (с НДС)</th>
                             </tr>
                         </thead>
                         <tbody id="accumulativeTableBody">
@@ -1781,7 +1785,11 @@
                 2: { type: 'string' },
                 3: { type: 'number' },
                 4: { type: 'number' },
-                5: { type: 'number' }
+                5: { type: 'number' },
+                6: { type: 'number' },
+                7: { type: 'number' },
+                8: { type: 'number' },
+                9: { type: 'number' }
             }
         },
         allReportsTable: {
@@ -6515,7 +6523,7 @@
         tableBody.innerHTML = '';
         
         if (data.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Нет данных</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="10" style="text-align: center;">Нет данных</td></tr>';
             refreshTableSorting('accumulativeTable');
             return;
         }
@@ -6526,13 +6534,21 @@
             const quantityValue = Number(item.Количество);
             const projectValue = Number(item.Проект);
             const percentValue = Number(item['%Выполнения']);
+            const unitWithoutVat = Number(item['Стоимость за единицу (без НДС)'] ?? 0);
+            const unitWithVat = Number(item['Стоимость за единицу (с НДС)'] ?? 0);
+            const totalWithoutVat = Number(item['Сумма (без НДС)'] ?? 0);
+            const totalWithVat = Number(item['Сумма (с НДС)'] ?? 0);
             row.innerHTML = `
                 <td>${sectionName}</td>
                 <td>${item.Работа}</td>
                 <td>${item['Единица измерения']}</td>
+                <td data-sort-value="${Number.isFinite(unitWithoutVat) ? unitWithoutVat : ''}">${formatMoneyValue(unitWithoutVat)}</td>
+                <td data-sort-value="${Number.isFinite(unitWithVat) ? unitWithVat : ''}">${formatMoneyValue(unitWithVat)}</td>
                 <td data-sort-value="${Number.isFinite(quantityValue) ? quantityValue : ''}">${item.Количество}</td>
                 <td data-sort-value="${Number.isFinite(projectValue) ? projectValue : ''}">${item.Проект}</td>
                 <td data-sort-value="${Number.isFinite(percentValue) ? percentValue : ''}">${item['%Выполнения']}%</td>
+                <td data-sort-value="${Number.isFinite(totalWithoutVat) ? totalWithoutVat : ''}">${formatMoneyValue(totalWithoutVat)}</td>
+                <td data-sort-value="${Number.isFinite(totalWithVat) ? totalWithVat : ''}">${formatMoneyValue(totalWithVat)}</td>
             `;
             tableBody.appendChild(row);
         });
@@ -6565,9 +6581,13 @@
                 'Раздел': item.Раздел || item.Категория || '',
                 'Работа': item.Работа,
                 'Единица измерения': item['Единица измерения'],
+                'Стоимость за единицу (без НДС)': formatMoneyValue(item['Стоимость за единицу (без НДС)']),
+                'Стоимость за единицу (с НДС)': formatMoneyValue(item['Стоимость за единицу (с НДС)']),
                 'Количество': item.Количество,
                 'Проектное число': item.Проект,
-                '% выполнения': item['%Выполнения']
+                '% выполнения': item['%Выполнения'],
+                'Сумма (без НДС)': formatMoneyValue(item['Сумма (без НДС)']),
+                'Сумма (с НДС)': formatMoneyValue(item['Сумма (с НДС)'])
             }));
 
             const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -6578,7 +6598,11 @@
                 { wch: 18 },
                 { wch: 14 },
                 { wch: 18 },
-                { wch: 16 }
+                { wch: 16 },
+                { wch: 18 },
+                { wch: 18 },
+                { wch: 18 },
+                { wch: 18 }
             ];
             worksheet['!cols'] = colWidths;
 
