@@ -3229,6 +3229,7 @@ async def get_accumulative_statement(foreman_id: Optional[int] = None):
                     w.category AS Раздел,
                     w.name AS Работа,
                     w.unit AS Единица_измерения,
+                    w.unit_cost_without_vat AS Стоимость_за_единицу_без_НДС,
                     SUM(wr.quantity) AS Количество,
                     w.project_total AS Проект,
                     CASE 
