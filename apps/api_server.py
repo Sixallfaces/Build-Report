@@ -3253,6 +3253,7 @@ async def get_accumulative_statement(foreman_id: Optional[int] = None):
                     ) = row
                     unit_cost_without_vat = unit_cost_without_vat or 0
                     total_without_vat = total_without_vat or 0
+                    total_with_vat = round(total_without_vat * 1.2, 2)
                     accumulative_data.append({
                         'Раздел': category,
                         'Работа': work,
