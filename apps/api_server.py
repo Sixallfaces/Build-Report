@@ -3253,7 +3253,7 @@ async def get_accumulative_statement(foreman_id: Optional[int] = None):
                         'Проект': project_total,
                         '%Выполнения': percentage
                     })
-                async with db.execute('''
+            async with db.execute('''
                 SELECT DISTINCT f.id, f.first_name, f.last_name
                 FROM work_reports wr
                 JOIN foremen f ON wr.foreman_id = f.id
