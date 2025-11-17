@@ -23,7 +23,6 @@ import requests
 DB_PATH = '/opt/stroykontrol/database/stroykontrol.db'
 API_HOST = '127.0.0.1'
 API_PORT = 8080
-VAT_MULTIPLIER = 1.2
 
 # --- Настройки Яндекс.Диска ---
 YANDEX_DISK_TOKEN = os.getenv('YANDEX_DISK_TOKEN')
@@ -294,10 +293,8 @@ async def get_active_works_from_db():
                         'На балансе': balance,
                         'Проект': project_total,  # НОВОЕ ПОЛЕ
                         'is_active': bool(is_active),
-                        'Стоимость за единицу (без НДС)': unit_cost_without_vat or 0,
-                        'Стоимость за единицу (с НДС)': round((unit_cost_without_vat or 0) * VAT_MULTIPLIER, 2),
-                        'Всего стоимость (без НДС)': total_cost_without_vat or 0,
-                        'Всего стоимость (с НДС)': round((total_cost_without_vat or 0) * VAT_MULTIPLIER, 2),
+                        'Стоимость за единицу': unit_cost_without_vat or 0,
+                        'Всего стоимость': total_cost_without_vat or 0,
                     })
                 logger.info(f"🔍 Найдено активных работ в БД: {len(works)}")
                 return works
@@ -335,10 +332,8 @@ async def get_all_works_from_db():
                         'На балансе': balance,
                         'Проект': project_total,  # НОВОЕ ПОЛЕ
                         'is_active': bool(is_active),
-                        'Стоимость за единицу (без НДС)': unit_cost_without_vat or 0,
-                        'Стоимость за единицу (с НДС)': round((unit_cost_without_vat or 0) * VAT_MULTIPLIER, 2),
-                        'Всего стоимость (без НДС)': total_cost_without_vat or 0,
-                        'Всего стоимость (с НДС)': round((total_cost_without_vat or 0) * VAT_MULTIPLIER, 2),
+                        'Стоимость за единицу': unit_cost_without_vat or 0,
+                        'Всего стоимость': total_cost_without_vat or 0,
                     })
                 logger.info(f"🔍 Найдено всех работ в БД: {len(works)}")
                 return works
@@ -3229,14 +3224,14 @@ async def get_accumulative_statement(foreman_id: Optional[int] = None):
                     w.category AS Раздел,
                     w.name AS Работа,
                     w.unit AS Единица_измерения,
-                    w.unit_cost_without_vat AS Стоимость_за_единицу_без_НДС,
+                    w.unit_cost_without_vat AS Стоимость_за_единицу,
                     SUM(wr.quantity) AS Количество,
                     w.project_total AS Проект,
                     CASE 
                         WHEN w.project_total > 0 THEN ROUND((SUM(wr.quantity) / w.project_total) * 100, 2)
                         ELSE 0
                     END AS Процент_выполнения,
-                    SUM(wr.quantity * COALESCE(w.unit_cost_without_vat, 0)) AS Сумма_без_НДС
+                    SUM(wr.quantity * COALESCE(w.unit_cost_without_vat, 0)) AS Сумма
                 FROM work_reports wr
                 JOIN works w ON wr.work_id = w.id
                 WHERE wr.is_verified = 1''' + foreman_filter + '''
@@ -3258,19 +3253,17 @@ async def get_accumulative_statement(foreman_id: Optional[int] = None):
                     ) = row
                     unit_cost_without_vat = unit_cost_without_vat or 0
                     total_without_vat = total_without_vat or 0
-                    total_with_vat = round(total_without_vat * VAT_MULTIPLIER, 2)
-                    unit_cost_with_vat = round(unit_cost_without_vat * VAT_MULTIPLIER, 2)
                     accumulative_data.append({
                         'Раздел': category,
                         'Работа': work,
                         'Единица измерения': unit,
-                        'Стоимость за единицу (без НДС)': unit_cost_without_vat,
-                        'Стоимость за единицу (с НДС)': unit_cost_with_vat,
+                        'Стоимость за единицу': unit_cost_without_vat,
                         'Количество': quantity,
                         'Проект': project_total,
                         '%Выполнения': percentage,
                         'Сумма (без НДС)': round(total_without_vat, 2),
                         'Сумма (с НДС)': total_with_vat,
+                        'Сумма': round(total_without_vat, 2),
                     })
             async with db.execute('''
                 SELECT DISTINCT f.id, f.first_name, f.last_name

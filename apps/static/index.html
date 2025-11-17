@@ -1148,23 +1148,14 @@
             <div class="work-pricing-section" style="padding: 0; border: none;">
                 <div class="work-pricing-list">
                     <div class="work-pricing-row">
-                        <label for="materialPriceUnitWithVat">Стоимость за единицу (с НДС)</label>
-                        <input type="number" id="materialPriceUnitWithVat" min="0" step="0.01" placeholder="0.00">
+                        <label for="materialPriceUnit">Стоимость за единицу</label>
+                        <input type="number" id="materialPriceUnit" min="0" step="0.01" placeholder="0.00">
                     </div>
                     <div class="work-pricing-row">
-                        <label for="materialPriceTotalWithVat">Всего стоимость (с НДС)</label>
-                        <input type="number" id="materialPriceTotalWithVat" min="0" step="0.01" placeholder="0.00">
-                    </div>
-                    <div class="work-pricing-row">
-                        <label for="materialPriceUnitWithoutVat">Стоимость за единицу (без НДС)</label>
-                        <input type="number" id="materialPriceUnitWithoutVat" min="0" step="0.01" placeholder="0.00">
-                    </div>
-                    <div class="work-pricing-row">
-                        <label for="materialPriceTotalWithoutVat">Всего стоимость (без НДС)</label>
-                        <input type="number" id="materialPriceTotalWithoutVat" min="0" step="0.01" placeholder="0.00">
+                        <label for="materialPriceTotal">Всего стоимость</label>
+                        <input type="number" id="materialPriceTotal" min="0" step="0.01" placeholder="0.00">
                     </div>
                 </div>
-                <div class="work-pricing-hint">НДС рассчитывается автоматически (20%).</div>
             </div>
 
             <div class="modal-actions">
@@ -1207,23 +1198,14 @@
                 <h4>Стоимость работы</h4>
                 <div class="work-pricing-list">
                     <div class="work-pricing-row">
-                        <label for="workPriceUnitWithVat">Стоимость за единицу (с НДС)</label>
-                        <input type="number" id="workPriceUnitWithVat" min="0" step="0.01" placeholder="0.00">
+                        <label for="workPriceUnit">Стоимость за единицу</label>
+                        <input type="number" id="workPriceUnit" min="0" step="0.01" placeholder="0.00">
                     </div>
                     <div class="work-pricing-row">
-                        <label for="workPriceTotalWithVat">Всего стоимость (с НДС)</label>
-                        <input type="number" id="workPriceTotalWithVat" min="0" step="0.01" placeholder="0.00">
-                    </div>
-                    <div class="work-pricing-row">
-                        <label for="workPriceUnitWithoutVat">Стоимость за единицу (без НДС)</label>
-                        <input type="number" id="workPriceUnitWithoutVat" min="0" step="0.01" placeholder="0.00">
-                    </div>
-                    <div class="work-pricing-row">
-                        <label for="workPriceTotalWithoutVat">Всего стоимость (без НДС)</label>
-                        <input type="number" id="workPriceTotalWithoutVat" min="0" step="0.01" placeholder="0.00">
+                        <label for="workPriceTotal">Всего стоимость</label>
+                        <input type="number" id="workPriceTotal" min="0" step="0.01" placeholder="0.00">
                     </div>
                 </div>
-                <div class="work-pricing-hint">НДС рассчитывается автоматически (20%).</div>
             </div>
 
             <div class="modal-actions">
@@ -1582,13 +1564,11 @@
                                 <th class="sortable">Раздел</th>
                                 <th class="sortable">Работа</th>
                                 <th class="sortable">Единица измерения</th>
-                                <th class="sortable">Стоимость за единицу (без НДС)</th>
-                                <th class="sortable">Стоимость за единицу (с НДС)</th>
+                                <th class="sortable">Стоимость за единицу</th>
                                 <th class="sortable">Количество</th>
                                 <th class="sortable">Проект</th>
                                 <th class="sortable">%Выполнения</th>
-                                <th class="sortable">Сумма (без НДС)</th>
-                                <th class="sortable">Сумма (с НДС)</th>
+                                <th class="sortable">Сумма</th>
                             </tr>
                         </thead>
                         <tbody id="accumulativeTableBody">
@@ -1675,8 +1655,7 @@
         return `${normalizedBase}/${normalizedPath}`;
     }
 
-    const VAT_RATE = 0.2;
-    const VAT_MULTIPLIER = 1 + VAT_RATE;
+    
 
     // Переменные состояния
     let works = [];
@@ -1689,16 +1668,16 @@
     let currentWorkIdForMaterials = null;
     let currentWorkMaterials = [];
     let currentWorkPricing = {
-        unitWithoutVat: null,
-        totalWithoutVat: null
+        unitCost: null,
+        totalCost: null
     };
     let currentMaterialIdForQuantity = null;
     let currentMaterialQuantity = 0;
     let currentMaterialUnit = '';
     let currentMaterialIdForPricing = null;
     let currentMaterialPricing = {
-        unitWithoutVat: null,
-        totalWithoutVat: null
+        unitCost: null,
+        totalCost: null
     };
     let materialHistory = [];
     let materialHistoryLoaded = false;
@@ -2369,10 +2348,8 @@
         }
 
         const pricingInputs = [
-            { id: 'workPriceUnitWithVat', field: 'unitWithVat' },
-            { id: 'workPriceTotalWithVat', field: 'totalWithVat' },
-            { id: 'workPriceUnitWithoutVat', field: 'unitWithoutVat' },
-            { id: 'workPriceTotalWithoutVat', field: 'totalWithoutVat' }
+            { id: 'workPriceUnit', field: 'unitCost' },
+            { id: 'workPriceTotal', field: 'totalCost' }
         ];
 
         pricingInputs.forEach(({ id, field }) => {
@@ -2402,10 +2379,8 @@
 
     function initializeMaterialPricingModal() {
         const pricingInputs = [
-            { id: 'materialPriceUnitWithVat', field: 'unitWithVat' },
-            { id: 'materialPriceTotalWithVat', field: 'totalWithVat' },
-            { id: 'materialPriceUnitWithoutVat', field: 'unitWithoutVat' },
-            { id: 'materialPriceTotalWithoutVat', field: 'totalWithoutVat' }
+            { id: 'materialPriceUnit', field: 'unitCost' },
+            { id: 'materialPriceTotal', field: 'totalCost' }
         ];
 
         pricingInputs.forEach(({ id, field }) => {
@@ -3497,53 +3472,38 @@
     function updateWorkPricingInputs(excludeIds = []) {
         const exclude = Array.isArray(excludeIds) ? new Set(excludeIds) : new Set([excludeIds]);
 
-        const unitWithInput = document.getElementById('workPriceUnitWithVat');
-        const totalWithInput = document.getElementById('workPriceTotalWithVat');
-        const unitWithoutInput = document.getElementById('workPriceUnitWithoutVat');
-        const totalWithoutInput = document.getElementById('workPriceTotalWithoutVat');
+        const unitInput = document.getElementById('workPriceUnit');
+        const totalInput = document.getElementById('workPriceTotal');
 
-        const unitWithoutBase = typeof currentWorkPricing.unitWithoutVat === 'number'
-            ? roundMoneyValue(Math.max(currentWorkPricing.unitWithoutVat, 0))
+        const unitValue = typeof currentWorkPricing.unitCost === 'number'
+            ? roundMoneyValue(Math.max(currentWorkPricing.unitCost, 0))
             : null;
-        const totalWithoutBase = typeof currentWorkPricing.totalWithoutVat === 'number'
-            ? roundMoneyValue(Math.max(currentWorkPricing.totalWithoutVat, 0))
+        const totalValue = typeof currentWorkPricing.totalCost === 'number'
+            ? roundMoneyValue(Math.max(currentWorkPricing.totalCost, 0))
             : null;
 
-        const unitWithBase = unitWithoutBase === null ? null : roundMoneyValue(unitWithoutBase * VAT_MULTIPLIER);
-        const totalWithBase = totalWithoutBase === null ? null : roundMoneyValue(totalWithoutBase * VAT_MULTIPLIER);
-
-        if (unitWithInput && !exclude.has('workPriceUnitWithVat')) {
-            unitWithInput.value = formatMoneyValue(unitWithBase);
+        if (unitInput && !exclude.has('workPriceUnit')) {
+            unitInput.value = formatMoneyValue(unitValue);
         }
-        if (totalWithInput && !exclude.has('workPriceTotalWithVat')) {
-            totalWithInput.value = formatMoneyValue(totalWithBase);
-        }
-        if (unitWithoutInput && !exclude.has('workPriceUnitWithoutVat')) {
-            unitWithoutInput.value = formatMoneyValue(unitWithoutBase);
-        }
-        if (totalWithoutInput && !exclude.has('workPriceTotalWithoutVat')) {
-            totalWithoutInput.value = formatMoneyValue(totalWithoutBase);
+        if (totalInput && !exclude.has('workPriceTotal')) {
+            totalInput.value = formatMoneyValue(totalValue);
         }
     }
 
     function handlePricingInput(field, rawValue) {
         const parsed = parseMoneyInput(rawValue);
 
-        if (field === 'unitWithVat') {
-            currentWorkPricing.unitWithoutVat = parsed === null ? null : roundMoneyValue(parsed / VAT_MULTIPLIER);
-        } else if (field === 'totalWithVat') {
-            currentWorkPricing.totalWithoutVat = parsed === null ? null : roundMoneyValue(parsed / VAT_MULTIPLIER);
-        } else if (field === 'unitWithoutVat') {
-            currentWorkPricing.unitWithoutVat = parsed === null ? null : roundMoneyValue(parsed);
-        } else if (field === 'totalWithoutVat') {
-            currentWorkPricing.totalWithoutVat = parsed === null ? null : roundMoneyValue(parsed);
+        if (field === 'unitCost') {
+            currentWorkPricing.unitCost = parsed === null ? null : roundMoneyValue(parsed);
+        } else if (field === 'totalCost') {
+            currentWorkPricing.totalCost = parsed === null ? null : roundMoneyValue(parsed);
         }
     }
 
     function resetWorkPricing() {
         currentWorkPricing = {
-            unitWithoutVat: null,
-            totalWithoutVat: null
+            unitCost: null,
+            totalCost: null
         };
         updateWorkPricingInputs();
     }
@@ -3551,53 +3511,38 @@
     function updateMaterialPricingInputs(excludeIds = []) {
         const exclude = Array.isArray(excludeIds) ? new Set(excludeIds) : new Set([excludeIds]);
 
-        const unitWithInput = document.getElementById('materialPriceUnitWithVat');
-        const totalWithInput = document.getElementById('materialPriceTotalWithVat');
-        const unitWithoutInput = document.getElementById('materialPriceUnitWithoutVat');
-        const totalWithoutInput = document.getElementById('materialPriceTotalWithoutVat');
+        const unitInput = document.getElementById('materialPriceUnit');
+        const totalInput = document.getElementById('materialPriceTotal');
 
-        const unitWithoutBase = typeof currentMaterialPricing.unitWithoutVat === 'number'
-            ? roundMoneyValue(Math.max(currentMaterialPricing.unitWithoutVat, 0))
+        const unitValue = typeof currentMaterialPricing.unitCost === 'number'
+            ? roundMoneyValue(Math.max(currentMaterialPricing.unitCost, 0))
             : null;
-        const totalWithoutBase = typeof currentMaterialPricing.totalWithoutVat === 'number'
-            ? roundMoneyValue(Math.max(currentMaterialPricing.totalWithoutVat, 0))
+        const totalValue = typeof currentMaterialPricing.totalCost === 'number'
+            ? roundMoneyValue(Math.max(currentMaterialPricing.totalCost, 0))
             : null;
 
-        const unitWithBase = unitWithoutBase === null ? null : roundMoneyValue(unitWithoutBase * VAT_MULTIPLIER);
-        const totalWithBase = totalWithoutBase === null ? null : roundMoneyValue(totalWithoutBase * VAT_MULTIPLIER);
-
-        if (unitWithInput && !exclude.has('materialPriceUnitWithVat')) {
-            unitWithInput.value = formatMoneyValue(unitWithBase);
+        if (unitInput && !exclude.has('materialPriceUnit')) {
+            unitInput.value = formatMoneyValue(unitValue);
         }
-        if (totalWithInput && !exclude.has('materialPriceTotalWithVat')) {
-            totalWithInput.value = formatMoneyValue(totalWithBase);
-        }
-        if (unitWithoutInput && !exclude.has('materialPriceUnitWithoutVat')) {
-            unitWithoutInput.value = formatMoneyValue(unitWithoutBase);
-        }
-        if (totalWithoutInput && !exclude.has('materialPriceTotalWithoutVat')) {
-            totalWithoutInput.value = formatMoneyValue(totalWithoutBase);
+        if (totalInput && !exclude.has('materialPriceTotal')) {
+            totalInput.value = formatMoneyValue(totalValue);
         }
     }
 
     function handleMaterialPricingInput(field, rawValue) {
         const parsed = parseMoneyInput(rawValue);
 
-        if (field === 'unitWithVat') {
-            currentMaterialPricing.unitWithoutVat = parsed === null ? null : roundMoneyValue(parsed / VAT_MULTIPLIER);
-        } else if (field === 'totalWithVat') {
-            currentMaterialPricing.totalWithoutVat = parsed === null ? null : roundMoneyValue(parsed / VAT_MULTIPLIER);
-        } else if (field === 'unitWithoutVat') {
-            currentMaterialPricing.unitWithoutVat = parsed === null ? null : roundMoneyValue(parsed);
-        } else if (field === 'totalWithoutVat') {
-            currentMaterialPricing.totalWithoutVat = parsed === null ? null : roundMoneyValue(parsed);
+        if (field === 'unitCost') {
+            currentMaterialPricing.unitCost = parsed === null ? null : roundMoneyValue(parsed);
+        } else if (field === 'totalCost') {
+            currentMaterialPricing.totalCost = parsed === null ? null : roundMoneyValue(parsed);
         }
     }
 
     function resetMaterialPricing() {
         currentMaterialPricing = {
-            unitWithoutVat: null,
-            totalWithoutVat: null
+            unitCost: null,
+            totalCost: null
         };
         updateMaterialPricingInputs();
     }
@@ -3608,8 +3553,8 @@
             if (response && response.success) {
                 const pricingData = response.data || {};
                 currentMaterialPricing = {
-                    unitWithoutVat: normalizeCostValue(pricingData.unit_cost_without_vat),
-                    totalWithoutVat: normalizeCostValue(pricingData.total_cost_without_vat)
+                    unitCost: normalizeCostValue(pricingData.unit_cost_without_vat),
+                    totalCost: normalizeCostValue(pricingData.total_cost_without_vat)
                 };
             } else {
                 const errorMessage = response?.error || response?.detail;
@@ -3662,11 +3607,11 @@
         }
 
         const payload = {
-            unit_cost_without_vat: typeof currentMaterialPricing.unitWithoutVat === 'number'
-                ? roundMoneyValue(Math.max(currentMaterialPricing.unitWithoutVat, 0)) || 0
+            unit_cost_without_vat: typeof currentMaterialPricing.unitCost === 'number'
+                ? roundMoneyValue(Math.max(currentMaterialPricing.unitCost, 0)) || 0
                 : 0,
-            total_cost_without_vat: typeof currentMaterialPricing.totalWithoutVat === 'number'
-                ? roundMoneyValue(Math.max(currentMaterialPricing.totalWithoutVat, 0)) || 0
+            total_cost_without_vat: typeof currentMaterialPricing.totalCost === 'number'
+                ? roundMoneyValue(Math.max(currentMaterialPricing.totalCost, 0)) || 0
                 : 0,
         };
 
@@ -3679,8 +3624,8 @@
             if (response && response.success) {
                 const pricingData = response.data || payload;
                 currentMaterialPricing = {
-                    unitWithoutVat: normalizeCostValue(pricingData.unit_cost_without_vat),
-                    totalWithoutVat: normalizeCostValue(pricingData.total_cost_without_vat)
+                    unitCost: normalizeCostValue(pricingData.unit_cost_without_vat),
+                    totalCost: normalizeCostValue(pricingData.total_cost_without_vat)
                 };
                 updateMaterialPricingInputs();
 
@@ -3688,8 +3633,8 @@
                 if (materialIndex !== -1) {
                     materials[materialIndex] = {
                         ...materials[materialIndex],
-                        unit_cost_without_vat: currentMaterialPricing.unitWithoutVat || 0,
-                        total_cost_without_vat: currentMaterialPricing.totalWithoutVat || 0
+                        unit_cost_without_vat: currentMaterialPricing.unitCost || 0,
+                        total_cost_without_vat: currentMaterialPricing.totalCost || 0
                     };
                 }
 
@@ -3732,8 +3677,8 @@
 
                 if (response.pricing && typeof response.pricing === 'object') {
                     currentWorkPricing = {
-                        unitWithoutVat: normalizeCostValue(response.pricing.unit_cost_without_vat),
-                        totalWithoutVat: normalizeCostValue(response.pricing.total_cost_without_vat)
+                        unitCost: normalizeCostValue(response.pricing.unit_cost_without_vat),
+                        totalCost: normalizeCostValue(response.pricing.total_cost_without_vat)
                     };
                     updateWorkPricingInputs();
                 } else {
@@ -3876,11 +3821,11 @@
         }));
 
         const pricingPayload = {
-            unit_cost_without_vat: typeof currentWorkPricing.unitWithoutVat === 'number'
-                ? roundMoneyValue(Math.max(currentWorkPricing.unitWithoutVat, 0)) || 0
+            unit_cost_without_vat: typeof currentWorkPricing.unitCost === 'number'
+                ? roundMoneyValue(Math.max(currentWorkPricing.unitCost, 0)) || 0
                 : 0,
-            total_cost_without_vat: typeof currentWorkPricing.totalWithoutVat === 'number'
-                ? roundMoneyValue(Math.max(currentWorkPricing.totalWithoutVat, 0)) || 0
+            total_cost_without_vat: typeof currentWorkPricing.totalCost === 'number'
+                ? roundMoneyValue(Math.max(currentWorkPricing.totalCost, 0)) || 0
                 : 0
         };
 
@@ -3908,8 +3853,8 @@
 
                 if (response.pricing && typeof response.pricing === 'object') {
                     currentWorkPricing = {
-                        unitWithoutVat: normalizeCostValue(response.pricing.unit_cost_without_vat),
-                        totalWithoutVat: normalizeCostValue(response.pricing.total_cost_without_vat)
+                        unitCost: normalizeCostValue(response.pricing.unit_cost_without_vat),
+                        totalCost: normalizeCostValue(response.pricing.total_cost_without_vat)
                     };
                 }
 
@@ -6523,7 +6468,7 @@
         tableBody.innerHTML = '';
         
         if (data.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="10" style="text-align: center;">Нет данных</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="8" style="text-align: center;">Нет данных</td></tr>';
             refreshTableSorting('accumulativeTable');
             return;
         }
@@ -6534,21 +6479,17 @@
             const quantityValue = Number(item.Количество);
             const projectValue = Number(item.Проект);
             const percentValue = Number(item['%Выполнения']);
-            const unitWithoutVat = Number(item['Стоимость за единицу (без НДС)'] ?? 0);
-            const unitWithVat = Number(item['Стоимость за единицу (с НДС)'] ?? 0);
-            const totalWithoutVat = Number(item['Сумма (без НДС)'] ?? 0);
-            const totalWithVat = Number(item['Сумма (с НДС)'] ?? 0);
+            const unitCost = Number(item['Стоимость за единицу'] ?? 0);
+            const totalCost = Number(item['Сумма'] ?? 0);
             row.innerHTML = `
                 <td>${sectionName}</td>
                 <td>${item.Работа}</td>
                 <td>${item['Единица измерения']}</td>
-                <td data-sort-value="${Number.isFinite(unitWithoutVat) ? unitWithoutVat : ''}">${formatMoneyValue(unitWithoutVat)}</td>
-                <td data-sort-value="${Number.isFinite(unitWithVat) ? unitWithVat : ''}">${formatMoneyValue(unitWithVat)}</td>
+                <td data-sort-value="${Number.isFinite(unitCost) ? unitCost : ''}">${formatMoneyValue(unitCost)}</td>
                 <td data-sort-value="${Number.isFinite(quantityValue) ? quantityValue : ''}">${item.Количество}</td>
                 <td data-sort-value="${Number.isFinite(projectValue) ? projectValue : ''}">${item.Проект}</td>
                 <td data-sort-value="${Number.isFinite(percentValue) ? percentValue : ''}">${item['%Выполнения']}%</td>
-                <td data-sort-value="${Number.isFinite(totalWithoutVat) ? totalWithoutVat : ''}">${formatMoneyValue(totalWithoutVat)}</td>
-                <td data-sort-value="${Number.isFinite(totalWithVat) ? totalWithVat : ''}">${formatMoneyValue(totalWithVat)}</td>
+                <td data-sort-value="${Number.isFinite(totalCost) ? totalCost : ''}">${formatMoneyValue(totalCost)}</td>
             `;
             tableBody.appendChild(row);
         });
@@ -6581,13 +6522,11 @@
                 'Раздел': item.Раздел || item.Категория || '',
                 'Работа': item.Работа,
                 'Единица измерения': item['Единица измерения'],
-                'Стоимость за единицу (без НДС)': formatMoneyValue(item['Стоимость за единицу (без НДС)']),
-                'Стоимость за единицу (с НДС)': formatMoneyValue(item['Стоимость за единицу (с НДС)']),
+                'Стоимость за единицу': formatMoneyValue(item['Стоимость за единицу']),
                 'Количество': item.Количество,
                 'Проектное число': item.Проект,
                 '% выполнения': item['%Выполнения'],
-                'Сумма (без НДС)': formatMoneyValue(item['Сумма (без НДС)']),
-                'Сумма (с НДС)': formatMoneyValue(item['Сумма (с НДС)'])
+                'Сумма': formatMoneyValue(item['Сумма'])
             }));
 
             const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -6596,10 +6535,8 @@
                 { wch: 25 },
                 { wch: 40 },
                 { wch: 18 },
-                { wch: 14 },
                 { wch: 18 },
                 { wch: 16 },
-                { wch: 18 },
                 { wch: 18 },
                 { wch: 18 },
                 { wch: 18 }
