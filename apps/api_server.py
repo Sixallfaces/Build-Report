@@ -8,6 +8,10 @@ import logging
 import os
 import re
 from datetime import datetime
+
+# --- Общие константы ---
+VAT_RATE = 0.2
+VAT_MULTIPLIER = 1 + VAT_RATE
 import traceback
 import hashlib
 import secrets
