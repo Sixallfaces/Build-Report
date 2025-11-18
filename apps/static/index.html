@@ -4544,6 +4544,7 @@
                 'Единица измерения': work['Единица измерения'],
                 'На балансе': work['На балансе'],
                 'Проект': work['Проект'] || 0,
+                'Стоимость за единицу': work['Стоимость за единицу'] ?? work.unit_cost_without_vat ?? 0,
                 'Активна': work.is_active ? 'Да' : 'Нет'
             }));
 
@@ -4556,6 +4557,7 @@
                 { wch: 15 },  // Единица измерения
                 { wch: 12 },  // На балансе
                 { wch: 12 },  // Проект
+                { wch: 18 },  // Стоимость за единицу
                 { wch: 10 }   // Активна
             ];
             worksheet['!cols'] = colWidths;
@@ -4634,12 +4636,15 @@
                 }
 
                 const sectionName = String(rawSection).trim();
+                const unitCost = parseFloat(row['Стоимость за единицу']) || 0;
                 const workData = {
                     name: String(row['Название работы']).trim(),
                     category: sectionName,
                     unit: String(row['Единица измерения']).trim(),
                     balance: parseFloat(row['На балансе']) || 0,
                     project_total: parseFloat(row['Проект']) || 0,
+                    unit_cost_without_vat: unitCost,
+                    total_cost_without_vat: unitCost * (parseFloat(row['Проект']) || 0),
                     is_active: String(row['Активна']).toLowerCase() === 'да' ? 1 : 0
                 };
 

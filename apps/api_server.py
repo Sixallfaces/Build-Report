@@ -2046,7 +2046,16 @@ async def export_works():
         ws.title = "Работы"
         
         # Заголовки
-        headers = ["ID", "Название работы", "Раздел", "Единица измерения", "На балансе", "Проект", "Активна"]
+        headers = [
+            "ID",
+            "Название работы",
+            "Раздел",
+            "Единица измерения",
+            "На балансе",
+            "Проект",
+            "Стоимость за единицу",
+            "Активна",
+        ]
         ws.append(headers)
         
         # Данные
@@ -2058,6 +2067,7 @@ async def export_works():
                 work['Единица измерения'],
                 work['На балансе'],
                 work['Проект'],
+                work.get('unit_cost_without_vat', 0),
                 "Да" if work['is_active'] else "Нет"
             ]
             ws.append(row)
@@ -2101,7 +2111,9 @@ async def import_works(file: UploadFile = File(...)):
                 continue
                 
             try:
-                work_id, name, category, unit, balance, project_total, is_active_str = row
+                work_id, name, category, unit, balance, project_total, unit_cost_without_vat, is_active_str = (
+                    row + (None,) * (8 - len(row))
+                )
                 
                 # Валидация обязательных полей
                 if not name or not category or not unit:
@@ -2118,6 +2130,9 @@ async def import_works(file: UploadFile = File(...)):
                     'unit': str(unit).strip(),
                     'balance': float(balance) if balance else 0,
                     'project_total': float(project_total) if project_total else 0,
+                    'unit_cost_without_vat': float(unit_cost_without_vat) if unit_cost_without_vat else 0,
+                    'total_cost_without_vat': (float(project_total) if project_total else 0)
+                    * (float(unit_cost_without_vat) if unit_cost_without_vat else 0),
                     'is_active': 1 if str(is_active_str).lower() in ['да', 'yes', 'true', '1'] else 0
                 }
                 
@@ -2163,7 +2178,14 @@ async def export_materials():
         ws = wb.active
         ws.title = "Материалы"
 
-        headers = ["ID", "Раздел", "Название материала", "Единица измерения", "Количество"]
+        headers = [
+            "ID",
+            "Раздел",
+            "Название материала",
+            "Единица измерения",
+            "Количество",
+            "Стоимость за единицу",
+        ]
         ws.append(headers)
 
         for material in materials:
@@ -2172,7 +2194,8 @@ async def export_materials():
                 material['category'],
                 material['name'],
                 material['unit'],
-                material['quantity']
+                material['quantity'],
+                material.get('unit_cost_without_vat', 0),
             ]
             ws.append(row)
 
@@ -2198,9 +2221,16 @@ async def download_materials_template():
         ws = wb.active
         ws.title = "Материалы"
 
-        headers = ["ID", "Раздел", "Название материала", "Единица измерения", "Количество"]
+        headers = [
+            "ID",
+            "Раздел",
+            "Название материала",
+            "Единица измерения",
+            "Количество",
+            "Стоимость за единицу",
+        ]
         ws.append(headers)
-        ws.append(["", "Раздел", "Пример материала", "шт", 0])
+        ws.append(["", "Раздел", "Пример материала", "шт", 0, 0])
 
         file_stream = io.BytesIO()
         wb.save(file_stream)
@@ -2236,7 +2266,9 @@ async def import_materials(file: UploadFile = File(...)):
                 continue
 
             try:
-                material_id, category, name, unit, quantity = row
+                # Поддерживаем дополнительную колонку стоимости за единицу, если она присутствует
+                material_id, category, name, unit, quantity, *extra = row
+                unit_cost_without_vat = float(extra[0]) if extra and extra[0] is not None else 0
 
                 if not category or not name or not unit:
                     errors.append(f"Пропущены обязательные поля в строке: {row}")
@@ -2246,7 +2278,9 @@ async def import_materials(file: UploadFile = File(...)):
                     'category': str(category).strip(),
                     'name': str(name).strip(),
                     'unit': str(unit).strip(),
-                    'quantity': float(quantity) if quantity is not None else 0
+                    'quantity': float(quantity) if quantity is not None else 0,
+                    'unit_cost_without_vat': unit_cost_without_vat,
+                    'total_cost_without_vat': (float(quantity) if quantity is not None else 0) * unit_cost_without_vat,
                 }
 
                 if material_id:
@@ -2254,6 +2288,11 @@ async def import_materials(file: UploadFile = File(...)):
                     if existing_material:
                         success = await update_material_in_db(int(material_id), material_payload)
                         if success:
+                            await update_material_pricing_in_db(
+                                int(material_id),
+                                unit_cost_without_vat,
+                                material_payload['total_cost_without_vat'],
+                            )
                             updated_count += 1
                         else:
                             errors.append(f"Ошибка обновления материала ID {material_id}")
