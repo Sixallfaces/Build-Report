@@ -1,0 +1,38 @@
+# Build-Report Dependencies
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Database
+aiosqlite>=0.19.0
+
+# Validation
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# HTTP Client
+requests>=2.31.0
+httpx>=0.25.0
+
+# Excel Support
+openpyxl>=3.1.0
+
+# Telegram Bot (for bot.py)
+aiogram>=3.2.0
+
+# Utilities
+python-multipart>=0.0.6
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+httpx>=0.25.0
+
+# Development
+black>=23.0.0
+isort>=5.12.0
+flake8>=6.1.0
+mypy>=1.7.0

@@ -7,8 +7,10 @@ Type=simple
 User=root
 WorkingDirectory=/opt/stroykontrol/app
 Environment=PATH=/opt/stroykontrol/venv/bin
+EnvironmentFile=/opt/stroykontrol/.env
 ExecStart=/opt/stroykontrol/venv/bin/python3 bot.py
 Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
