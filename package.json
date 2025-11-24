@@ -7,10 +7,9 @@
     "test": "tests"
   },
   "scripts": {
-    "build": "npm run build:minify && npm run build:obfuscate && npm run build:css",
+    "build": "npm run build:minify && npm run build:obfuscate",
     "build:minify": "terser apps/static/js/app.js -c -m -o apps/static/js/app.terser.js",
     "build:obfuscate": "javascript-obfuscator apps/static/js/app.terser.js -o apps/static/js/app.min.js --compact true --control-flow-flattening true --control-flow-flattening-threshold 0.5 --identifier-names-generator hexadecimal --string-array true --string-array-encoding base64 --string-array-threshold 0.5 && rm -f apps/static/js/app.terser.js",
-    "build:css": "cleancss -o apps/static/css/style.min.css apps/static/css/style.css",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

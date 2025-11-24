@@ -1,5 +1,6 @@
 #!/bin/bash
-# Build script for minifying and obfuscating frontend assets
+# Build script for obfuscating JavaScript
+# CSS остаётся открытым для удобного редактирования
 # Usage: ./build.sh
 
 set -e
@@ -8,11 +9,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATIC_DIR="$SCRIPT_DIR/apps/static"
 
 echo "=== Building frontend assets ==="
+echo ""
+echo "CSS: остаётся открытым (style.css) - редактируйте напрямую"
+echo ""
 
 # Check if npm dependencies are installed
 if [ ! -d "$SCRIPT_DIR/node_modules" ]; then
     echo "Installing npm dependencies..."
-    npm install terser clean-css-cli javascript-obfuscator --save-dev
+    npm install terser javascript-obfuscator --save-dev
 fi
 
 # Step 1: Minify JavaScript with terser
@@ -44,18 +48,12 @@ rm -f "$STATIC_DIR/js/app.terser.js"
 
 JS_ORIG=$(wc -c < "$STATIC_DIR/js/app.js")
 JS_MIN=$(wc -c < "$STATIC_DIR/js/app.min.js")
-echo "  app.js: $JS_ORIG -> $JS_MIN bytes"
-
-# Minify CSS with clean-css
-echo "Step 3: Minifying CSS..."
-npx cleancss -o "$STATIC_DIR/css/style.min.css" "$STATIC_DIR/css/style.css"
-
-CSS_ORIG=$(wc -c < "$STATIC_DIR/css/style.css")
-CSS_MIN=$(wc -c < "$STATIC_DIR/css/style.min.css")
-echo "  style.css: $CSS_ORIG -> $CSS_MIN bytes ($(( 100 - CSS_MIN * 100 / CSS_ORIG ))% reduction)"
+echo "  app.js: $JS_ORIG -> $JS_MIN bytes (obfuscated)"
 
 echo ""
 echo "=== Build complete ==="
-echo "Files generated:"
-echo "  - $STATIC_DIR/js/app.min.js (obfuscated)"
-echo "  - $STATIC_DIR/css/style.min.css"
+echo ""
+echo "Что редактировать:"
+echo "  HTML:   apps/static/index.html      (без пересборки)"
+echo "  CSS:    apps/static/css/style.css   (без пересборки)"
+echo "  JS:     apps/static/js/app.js       (требует ./build.sh)"
