@@ -1,0 +1,27 @@
+{
+  "name": "build-report",
+  "version": "1.0.0",
+  "description": "Automatic deployment system",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "build": "npm run build:minify && npm run build:obfuscate",
+    "build:minify": "terser apps/static/js/app.js -c -m -o apps/static/js/app.terser.js",
+    "build:obfuscate": "javascript-obfuscator apps/static/js/app.terser.js -o apps/static/js/app.min.js --compact true --control-flow-flattening true --control-flow-flattening-threshold 0.5 --identifier-names-generator hexadecimal --string-array true --string-array-encoding base64 --string-array-threshold 0.5 && rm -f apps/static/js/app.terser.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:41590/git/Sixallfaces/Build-Report"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "clean-css-cli": "^5.6.3",
+    "javascript-obfuscator": "^4.1.1",
+    "terser": "^5.44.1"
+  }
+}

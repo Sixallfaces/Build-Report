@@ -42,15 +42,25 @@ sudo mkdir -p "$APP_DIR"
 sudo mkdir -p "$DB_DIR"
 echo -e "${GREEN}✓ Директории созданы${NC}"
 
-# 3. Копирование файлов
-echo -e "\n${YELLOW}[3/6] Копирование файлов приложения...${NC}"
+# 3. Сборка фронтенда
+echo -e "\n${YELLOW}[3/7] Сборка фронтенда (минификация)...${NC}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/build.sh" ]; then
+    cd "$SCRIPT_DIR"
+    bash build.sh
+    echo -e "${GREEN}✓ Фронтенд собран${NC}"
+else
+    echo -e "${YELLOW}⚠ build.sh не найден, пропускаем сборку${NC}"
+fi
+
+# 4. Копирование файлов
+echo -e "\n${YELLOW}[4/7] Копирование файлов приложения...${NC}"
 sudo cp -r "$SCRIPT_DIR/apps/"* "$APP_DIR/"
 sudo cp "$SCRIPT_DIR/requirements.txt" "$APP_DIR/"
 echo -e "${GREEN}✓ Файлы скопированы${NC}"
 
-# 4. Установка зависимостей
-echo -e "\n${YELLOW}[4/6] Установка зависимостей...${NC}"
+# 5. Установка зависимостей
+echo -e "\n${YELLOW}[5/7] Установка зависимостей...${NC}"
 if [ ! -d "$VENV_DIR" ]; then
     echo "Создание виртуального окружения..."
     sudo python3 -m venv "$VENV_DIR"
@@ -60,15 +70,15 @@ sudo "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
 sudo "$VENV_DIR/bin/pip" install python-dotenv
 echo -e "${GREEN}✓ Зависимости установлены${NC}"
 
-# 5. Установка systemd сервисов
-echo -e "\n${YELLOW}[5/6] Установка systemd сервисов...${NC}"
+# 6. Установка systemd сервисов
+echo -e "\n${YELLOW}[6/7] Установка systemd сервисов...${NC}"
 sudo cp "$SCRIPT_DIR/systemd/stroykontrol-api.service" /etc/systemd/system/
 sudo cp "$SCRIPT_DIR/systemd/stroykontrol-bot.service" /etc/systemd/system/
 sudo systemctl daemon-reload
 echo -e "${GREEN}✓ Systemd сервисы установлены${NC}"
 
-# 6. Перезапуск сервисов
-echo -e "\n${YELLOW}[6/6] Перезапуск сервисов...${NC}"
+# 7. Перезапуск сервисов
+echo -e "\n${YELLOW}[7/7] Перезапуск сервисов...${NC}"
 sudo systemctl restart stroykontrol-api
 sudo systemctl restart stroykontrol-bot
 sudo systemctl enable stroykontrol-api
