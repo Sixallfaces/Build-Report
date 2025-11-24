@@ -1,0 +1,27 @@
+{
+  "name": "build-report",
+  "version": "1.0.0",
+  "description": "Automatic deployment system",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "build": "npm run build:js && npm run build:css",
+    "build:js": "terser apps/static/js/app.js -c -m --mangle-props regex=/^_/ -o apps/static/js/app.min.js",
+    "build:css": "cleancss -o apps/static/css/style.min.css apps/static/css/style.css",
+    "watch": "npm run build && echo 'Build complete!'",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:41590/git/Sixallfaces/Build-Report"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "clean-css-cli": "^5.6.3",
+    "terser": "^5.44.1"
+  }
+}
