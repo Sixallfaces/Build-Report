@@ -14,33 +14,79 @@ import requests
 import logging
 import traceback
 import urllib.parse
-import aiosqlite # Импортируем aiosqlite
+import aiosqlite
 from typing import Optional, List, Set
+from pathlib import Path
+
+# Загрузка переменных окружения из .env файла
+try:
+    from dotenv import load_dotenv
+    # Ищем .env в директории приложения или на уровень выше
+    env_paths = [
+        Path(__file__).parent / '.env',
+        Path(__file__).parent.parent / '.env',
+        Path('/opt/stroykontrol/.env'),
+    ]
+    for env_path in env_paths:
+        if env_path.exists():
+            load_dotenv(env_path)
+            break
+except ImportError:
+    pass  # python-dotenv не установлен, используем системные переменные
 
 # Настройка логирования
+log_file = os.getenv('LOG_FILE', '/var/log/telegram-bot.log')
+log_level = os.getenv('LOG_LEVEL', 'INFO')
+
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=getattr(logging, log_level, logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/var/log/telegram-bot.log'),
+        logging.FileHandler(log_file),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger('telegram_bot')
 
-# Настройки
-BOT_TOKEN = '8311513221:AAEO5oV-EnidielOmTI6fOUigaoRT4Z3OrQ'
-GOOGLE_SHEETS_CREDENTIALS = '/root/telegram-bot/buildreport-472507-3fcd421ee5fc.json'
-SPREADSHEET_ID = '13phAhf4kwXS8WeFnw0EhyiOC23mVZclm8Kz91-b8mh4'
-MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+# ============================================================
+# НАСТРОЙКИ ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ
+# Создайте файл .env с этими переменными или задайте их в системе
+# ============================================================
 
-# Настройки Яндекс.Диска
-YANDEX_DISK_TOKEN = 'y0__xCK3sK_CBi_mDsg-J_i9BQLL_HZkMb3fig6Whe7-Yke5FYqDQ'
-YANDEX_DISK_BASE_FOLDER = 'StroyKontrol'
-YANDEX_DISK_PEOPLE_REPORTS_FOLDER = 'Фото отчеты (Люди)'
+# Telegram Bot Token (ОБЯЗАТЕЛЬНО)
+BOT_TOKEN = os.getenv('BOT_TOKEN', '')
+if not BOT_TOKEN:
+    logger.error("BOT_TOKEN не задан! Укажите переменную окружения BOT_TOKEN")
+    raise ValueError("BOT_TOKEN environment variable is required")
 
-# ID руководителей (замените на реальные)
-MANAGER_USER_IDS = {5272575484, 882521259, 6075183361}
+# Яндекс.Диск настройки
+YANDEX_DISK_TOKEN = os.getenv('YANDEX_DISK_TOKEN', '')
+YANDEX_DISK_BASE_FOLDER = os.getenv('YANDEX_DISK_BASE_FOLDER', 'StroyKontrol')
+YANDEX_DISK_PEOPLE_REPORTS_FOLDER = os.getenv('YANDEX_DISK_PEOPLE_REPORTS_FOLDER', 'Фото отчеты (Люди)')
+
+if not YANDEX_DISK_TOKEN:
+    logger.warning("YANDEX_DISK_TOKEN не задан! Загрузка фото на Яндекс.Диск не будет работать")
+
+# ID руководителей (через запятую в переменной окружения)
+_manager_ids_str = os.getenv('MANAGER_USER_IDS', '')
+MANAGER_USER_IDS: Set[int] = set()
+if _manager_ids_str:
+    try:
+        MANAGER_USER_IDS = {int(x.strip()) for x in _manager_ids_str.split(',') if x.strip()}
+    except ValueError:
+        logger.warning("Неверный формат MANAGER_USER_IDS")
+
+# Путь к базе данных
+DB_PATH = os.getenv('DATABASE_PATH', '/opt/stroykontrol/database/stroykontrol.db')
+
+# Временная зона
+MOSCOW_TZ = ZoneInfo(os.getenv('TIMEZONE', 'Europe/Moscow'))
+
+# Google Sheets (устаревшее, но оставлено для совместимости)
+GOOGLE_SHEETS_CREDENTIALS = os.getenv('GOOGLE_SHEETS_CREDENTIALS', '')
+SPREADSHEET_ID = os.getenv('SPREADSHEET_ID', '')
+
+logger.info(f"Конфигурация загружена. DB_PATH={DB_PATH}, MANAGER_IDS={MANAGER_USER_IDS}")
 
 # Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN)
@@ -60,9 +106,6 @@ class Form(StatesGroup):
     # Новые состояния для руководителя
     manager_selecting_report_type = State()
     manager_entering_custom_date = State()
-
-# Путь к файлу базы данных SQLite
-DB_PATH = '/opt/stroykontrol/database/stroykontrol.db'
 
 # === ФУНКЦИИ РАБОТЫ С БАЗОЙ ДАННЫХ ===
 
